@@ -24,7 +24,7 @@ from nordlys_discovery.db.session import make_engine
 from nordlys_discovery.embeddings.others import HashingEmbeddings
 
 ROOT = Path(__file__).resolve().parents[1]
-PGVECTOR_IMAGE = "pgvector/pgvector:pg16"
+PGVECTOR_IMAGE = "pgvector/pgvector:pg17"
 
 
 @pytest.fixture(scope="session")

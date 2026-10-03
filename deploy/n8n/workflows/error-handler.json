@@ -1,0 +1,70 @@
+{
+  "id": "3c9ff3aaa0225ab4",
+  "name": "Z · Error handler (alerts platform ops)",
+  "active": false,
+  "nodes": [
+    {
+      "id": "f322a853-9a78-5b0f-9858-5c1dfdd3ddad",
+      "name": "On workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {},
+      "notes": "[trigger] Any unhandled failure in workflows A or B",
+      "notesInFlow": true
+    },
+    {
+      "id": "bf6df3fa-13ff-5835-9794-04aa2d1dbec6",
+      "name": "Alert platform ops",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "discovery-platform@nordlys.example",
+        "toEmail": "={{ $env.NORDLYS_OPS_EMAIL }}",
+        "subject": "=n8n workflow failed: {{ $json.workflow.name }}",
+        "emailFormat": "html",
+        "html": "=<p>Workflow <b>{{ $json.workflow.name }}</b> failed in node <b>{{ $json.execution.lastNodeExecuted }}</b>.</p><p>{{ $json.execution.error.message }}</p><p>Execution {{ $json.execution.id }}: {{ $json.execution.url }}</p><p>No access was granted by a failed run: grants happen only after a recorded human approval.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "mailpit-smtp",
+          "name": "Mailpit SMTP (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[human] Ops investigates",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "On workflow error": {
+      "main": [
+        [
+          {
+            "node": "Alert platform ops",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "tags": []
+}

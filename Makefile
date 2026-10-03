@@ -1,4 +1,5 @@
-.PHONY: install model db migrate ingest serve mcp mcp-demo search catalog generate test test-unit lint check down
+comma := ,
+.PHONY: install model db migrate ingest serve mcp mcp-demo search catalog generate test test-unit lint check down up image workflows demo-access-flow
 
 install:
 	uv sync
@@ -46,7 +47,20 @@ lint:
 
 check: lint
 	uv run python -m scripts.catalog_gen --check
+	uv run python deploy/n8n/build_workflows.py --check
 	uv run pytest
+
+image:            ## build the app image (works behind a TLS-intercepting proxy: CA passed as a build secret)
+	DOCKER_BUILDKIT=1 docker build $(if $(CA_BUNDLE),--secret id=ca_bundle$(comma)src=$(CA_BUNDLE)) $(DOCKER_BUILD_ARGS) -t nordlys-discovery:dev .
+
+up: image         ## full local stack: catalog, MCP, Keycloak, n8n, Mailpit, Postgres
+	docker compose up -d --wait
 
 down:
 	docker compose down
+
+workflows:        ## regenerate the n8n workflow JSON from deploy/n8n/build_workflows.py
+	uv run python deploy/n8n/build_workflows.py
+
+demo-access-flow: ## Workflow A end to end: request over MCP -> e-mail -> approve -> role granted
+	uv run python scripts/demo_access_flow.py --reset

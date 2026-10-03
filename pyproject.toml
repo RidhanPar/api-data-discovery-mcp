@@ -55,6 +55,8 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.ruff.lint.per-file-ignores]
 # Hand-written catalog content: long description strings are data, not code.
 "scripts/catalog_gen/*.py" = ["E501"]
+# Embedded JavaScript and n8n expressions are data.
+"deploy/n8n/build_workflows.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -1,9 +1,12 @@
 """Outbound event: tell the workflow engine (n8n, Workflow A) about a new access request.
 
 The request is already committed as `pending_approval` before this runs, so a failed
-notification can never lose or approve a request. It only delays the human review, and
-the failure is written to the audit log. n8n also has a scheduled sweep for pending
-requests it has not seen (see docs/n8n.md), so delivery is at-least-once overall.
+notification can never lose or approve a request. It only delays the human review: the
+failure is written to the audit log (`access_request.workflow_notify`, decision `error`)
+and the request stays visible via GET /v1/access-requests?status=pending_approval.
+Known limitation: delivery is best-effort with retries, not guaranteed. A transactional
+outbox (event row written in the same transaction, relayed by a worker) would make it
+at-least-once; see README "What I'd do next".
 
 Payloads are signed: X-Nordlys-Signature = "sha256=" + HMAC-SHA256(secret, f"{ts}.{body}"),
 with X-Nordlys-Timestamp. The receiver rejects stale timestamps (replay) and bad MACs.

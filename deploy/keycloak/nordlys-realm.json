@@ -5,56 +5,193 @@
   "sslRequired": "external",
   "accessTokenLifespan": 300,
   "revokeRefreshToken": true,
-  "defaultDefaultClientScopes": ["basic", "profile"],
+  "defaultDefaultClientScopes": [
+    "basic",
+    "profile"
+  ],
   "clientScopes": [
     {
       "name": "basic",
       "protocol": "openid-connect",
-      "attributes": {"include.in.token.scope": "false"},
+      "attributes": {
+        "include.in.token.scope": "false"
+      },
       "protocolMappers": [
-        {"name": "sub", "protocol": "openid-connect", "protocolMapper": "oidc-sub-mapper",
-         "config": {"access.token.claim": "true", "introspection.token.claim": "true"}}
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "config": {
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
       ]
     },
     {
       "name": "profile",
       "protocol": "openid-connect",
-      "attributes": {"include.in.token.scope": "true"},
+      "attributes": {
+        "include.in.token.scope": "true"
+      },
       "protocolMappers": [
-        {"name": "username", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-attribute-mapper",
-         "config": {"user.attribute": "username", "claim.name": "preferred_username", "jsonType.label": "String",
-                    "access.token.claim": "true", "id.token.claim": "true"}},
-        {"name": "email", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-attribute-mapper",
-         "config": {"user.attribute": "email", "claim.name": "email", "jsonType.label": "String",
-                    "access.token.claim": "true", "id.token.claim": "true"}}
+        {
+          "name": "username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true"
+          }
+        },
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true"
+          }
+        }
       ]
     },
     {
       "name": "aud-nordlys-mcp",
       "description": "Binds tokens to the MCP server (resource indicator / audience).",
       "protocol": "openid-connect",
-      "attributes": {"include.in.token.scope": "false"},
+      "attributes": {
+        "include.in.token.scope": "false"
+      },
       "protocolMappers": [
-        {"name": "audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
-         "config": {"included.custom.audience": "nordlys-mcp", "access.token.claim": "true"}}
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "nordlys-mcp",
+            "access.token.claim": "true"
+          }
+        }
       ]
     },
     {
       "name": "aud-nordlys-catalog",
       "description": "Binds tokens to the catalog service.",
       "protocol": "openid-connect",
-      "attributes": {"include.in.token.scope": "false"},
+      "attributes": {
+        "include.in.token.scope": "false"
+      },
       "protocolMappers": [
-        {"name": "audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
-         "config": {"included.custom.audience": "nordlys-catalog", "access.token.claim": "true"}}
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "nordlys-catalog",
+            "access.token.claim": "true"
+          }
+        }
       ]
     },
-    {"name": "catalog.read", "description": "Search and read API/data product metadata", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
-    {"name": "dataproduct.read", "description": "Read data contracts (and non-sensitive samples)", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
-    {"name": "access.request", "description": "File access requests", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
-    {"name": "access.approve", "description": "Decide access requests (approvers)", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
-    {"name": "catalog.internal", "description": "Service-to-service calls to the catalog", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
-    {"name": "claims.search", "description": "Example asset scope: Claims Search API", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}}
+    {
+      "name": "catalog.read",
+      "description": "Search and read API/data product metadata",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "dataproduct.read",
+      "description": "Read data contracts (and non-sensitive samples)",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "access.request",
+      "description": "File access requests",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "access.approve",
+      "description": "Decide access requests (approvers)",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "catalog.internal",
+      "description": "Service-to-service calls to the catalog",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "roles-claim",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "name": "roles",
+      "description": "Realm and client roles in the standard Keycloak claims (needed by the Admin API)",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "realm_access.roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "client roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "config": {
+            "claim.name": "resource_access.${client_id}.roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
   ],
   "clients": [
     {
@@ -67,8 +204,15 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "protocol": "openid-connect",
-      "defaultClientScopes": ["basic", "profile", "aud-nordlys-mcp", "catalog.read", "dataproduct.read", "access.request"],
-      "optionalClientScopes": ["claims.search"]
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "aud-nordlys-mcp",
+        "catalog.read",
+        "dataproduct.read",
+        "access.request",
+        "roles-claim"
+      ]
     },
     {
       "clientId": "nordlys-mcp-server",
@@ -80,7 +224,11 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "protocol": "openid-connect",
-      "defaultClientScopes": ["basic", "aud-nordlys-catalog", "catalog.internal"]
+      "defaultClientScopes": [
+        "basic",
+        "aud-nordlys-catalog",
+        "catalog.internal"
+      ]
     },
     {
       "clientId": "nordlys-n8n",
@@ -92,7 +240,13 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "protocol": "openid-connect",
-      "defaultClientScopes": ["basic", "aud-nordlys-catalog", "catalog.internal", "access.approve"]
+      "defaultClientScopes": [
+        "basic",
+        "aud-nordlys-catalog",
+        "catalog.internal",
+        "access.approve",
+        "roles"
+      ]
     },
     {
       "clientId": "nordlys-dev-cli",
@@ -101,11 +255,23 @@
       "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
-      "redirectUris": ["http://localhost:*", "http://127.0.0.1:*"],
-      "attributes": {"pkce.code.challenge.method": "S256"},
+      "redirectUris": [
+        "http://localhost:*",
+        "http://127.0.0.1:*"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
       "protocol": "openid-connect",
-      "defaultClientScopes": ["basic", "profile", "aud-nordlys-mcp", "catalog.read", "dataproduct.read", "access.request"],
-      "optionalClientScopes": ["claims.search"]
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "aud-nordlys-mcp",
+        "catalog.read",
+        "dataproduct.read",
+        "access.request",
+        "roles-claim"
+      ]
     }
   ],
   "users": [
@@ -116,7 +282,13 @@
       "lastName": "Developer",
       "emailVerified": true,
       "enabled": true,
-      "credentials": [{"type": "password", "value": "alice-local", "temporary": false}]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice-local",
+          "temporary": false
+        }
+      ]
     },
     {
       "username": "bob",
@@ -125,7 +297,44 @@
       "lastName": "Approver",
       "emailVerified": true,
       "enabled": true,
-      "credentials": [{"type": "password", "value": "bob-local", "temporary": false}]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob-local",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "service-account-nordlys-n8n",
+      "enabled": true,
+      "serviceAccountClientId": "nordlys-n8n",
+      "clientRoles": {
+        "realm-management": [
+          "view-users",
+          "manage-users",
+          "view-realm",
+          "manage-realm"
+        ]
+      }
+    },
+    {
+      "username": "dpo",
+      "email": "dpo@nordlys.example",
+      "firstName": "Data",
+      "lastName": "Protection Officer",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dpo-local",
+          "temporary": false
+        }
+      ]
     }
-  ]
+  ],
+  "roles": {
+    "realm": []
+  }
 }

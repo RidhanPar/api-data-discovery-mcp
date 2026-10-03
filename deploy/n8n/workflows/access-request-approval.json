@@ -1,0 +1,1270 @@
+{
+  "id": "30c12db51d4259ce",
+  "name": "A · Access request with human approval",
+  "active": false,
+  "nodes": [
+    {
+      "id": "6f8d091f-86e7-5a65-8276-89cf914c442a",
+      "name": "Access request created",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "access-request-created",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "webhookId": "11be59b6-d0c8-5d94-b49c-2cf75fca0a4e",
+      "notes": "[trigger] Signed event from the catalog after request_access",
+      "notesInFlow": true
+    },
+    {
+      "id": "d7d8c40a-cb50-5571-a6b1-e8f858e15da5",
+      "name": "Verify signature & payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// [rule] Deterministic checks before anything else happens:\n//  - HMAC-SHA256 over \"<timestamp>.<raw body>\" with the shared webhook secret\n//  - timestamp no older than 5 minutes (replay protection)\n//  - payload shape: a pending access request with at least one approver\nconst crypto = require('crypto');\nconst item = $input.first();\nconst h = item.json.headers || {};\nconst ts = String(h['x-nordlys-timestamp'] || '');\nconst sig = String(h['x-nordlys-signature'] || '');\nlet raw;\nif (item.binary && item.binary.data) {\n  raw = await this.helpers.getBinaryDataBuffer(0, 'data');\n} else {\n  raw = Buffer.from(JSON.stringify(item.json.body));\n}\nconst expected = 'sha256=' + crypto.createHmac('sha256', $env.NORDLYS_WEBHOOK_SECRET)\n  .update(Buffer.concat([Buffer.from(ts + '.'), raw])).digest('hex');\nconst fresh = /^\\d+$/.test(ts) && Math.abs(Date.now() / 1000 - Number(ts)) <= 300;\nconst sigOk = sig.length === expected.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));\nconst body = item.json.body || {};\nconst r = body.access_request || {};\nconst shapeOk = body.event === 'access_request.created' && /^[0-9a-f-]{36}$/.test(r.id || '')\n  && r.status === 'pending_approval' && Array.isArray(r.approvers) && r.approvers.length > 0;\nconst valid = sigOk && fresh && shapeOk;\nconst reason = !sigOk ? 'bad signature' : !fresh ? 'stale or missing timestamp' : !shapeOk ? 'unexpected payload' : 'ok';\nreturn [{ json: { valid, reason, request_id: body.request_id || null, request: valid ? r : null } }];\n"
+      },
+      "notes": "[rule] HMAC + replay window + schema",
+      "notesInFlow": true
+    },
+    {
+      "id": "2b2071a9-9625-5e7f-ab09-83e52c991708",
+      "name": "Valid event?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d0030c21-a14e-5c7e-a6ed-ff8e43f46f69",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "[rule]",
+      "notesInFlow": true
+    },
+    {
+      "id": "dcf41d86-0f51-5166-97be-1fed8e25f290",
+      "name": "Reject (401)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        780,
+        180
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": $json.reason } }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "7cd6eae6-3413-516a-91ce-73f3cf5d796d",
+      "name": "Accept (202)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        780,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"accepted\": true, \"access_request_id\": $json.request.id } }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "notes": "Answer the catalog immediately; review continues asynchronously",
+      "notesInFlow": true
+    },
+    {
+      "id": "16c2bfbb-ca04-50fe-8e25-6df161b05acc",
+      "name": "Service token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NORDLYS_TOKEN_URL }}",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "={{ $env.NORDLYS_N8N_CLIENT_ID }}"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $env.NORDLYS_N8N_CLIENT_SECRET }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system] OAuth client credentials (n8n's own identity)",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "699df50c-f56f-57e5-ae3d-d92e14a102f3",
+      "name": "Re-read request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.NORDLYS_CATALOG_URL }}/v1/access-requests/{{ $('Verify signature & payload').first().json.request.id }}",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Service token').first().json.access_token }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[rule] Source of truth is the catalog, not the event payload",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "473df117-f992-553f-9ab5-bd74a387eea3",
+      "name": "Plan approval chain",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// [rule] Map the approval route to an ordered chain of human approvers (deterministic).\n// The directory below stands in for an HR/IAM lookup (Entra ID groups in production).\nconst DIRECTORY = {\n  'role:data-protection-officer': ['dpo@nordlys.example'],\n  'role:information-security': ['infosec@nordlys.example'],\n  'team:partner-integrations': ['bob@nordlys.example'],\n};\nconst DEFAULT_TEAM_APPROVER = 'bob@nordlys.example';  // team leads; one per team in a real directory\nconst r = $json;\nconst requesterEmail = r.requester.includes('@') ? r.requester : `${r.requester}@nordlys.example`;\nconst stages = r.approvers.map((role) => {\n  const pool = DIRECTORY[role] || (role.startsWith('team:') ? [DEFAULT_TEAM_APPROVER] : []);\n  // Four-eyes: never route a request to its own requester.\n  const approver = pool.find((a) => a !== requesterEmail);\n  return { role, approver: approver || null };\n});\nconst unroutable = stages.filter((s) => !s.approver).map((s) => s.role);\nconst timeout_minutes = Number($env.NORDLYS_APPROVAL_TIMEOUT_MINUTES || 1440);\nconst still_pending = r.status === 'pending_approval';\n// Routing: 0 = start approvals, 1 = nothing to do (already decided), 2 = cannot route -> ops.\nconst route = !still_pending ? 1 : unroutable.length ? 2 : 0;\nreturn [{ json: { route, still_pending, unroutable, stages, timeout_minutes,\n  request: { ...r, requester_email: requesterEmail } } }];\n"
+      },
+      "notes": "[rule] Route -> ordered approvers; four-eyes",
+      "notesInFlow": true
+    },
+    {
+      "id": "5f7abb71-859d-5d73-8472-c82db005cca7",
+      "name": "Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1820,
+        0
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 3,
+        "output": "={{ $json.route }}"
+      },
+      "notes": "[rule] 0 approve · 1 done · 2 unroutable",
+      "notesInFlow": true
+    },
+    {
+      "id": "deb08dd4-70a6-56e3-aa41-03903b40982f",
+      "name": "Already decided",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2080,
+        180
+      ],
+      "parameters": {},
+      "notes": "Idempotent: a redelivered event changes nothing",
+      "notesInFlow": true
+    },
+    {
+      "id": "3637f7a3-58ce-5cdb-a279-df63e841d075",
+      "name": "Sign links (stage 1)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// [rule] One approve and one reject link per approver. Each link carries an HMAC over\n// (execution id, stage, approver, decision), so a recipient cannot edit the URL to approve\n// as someone else or at another stage. The resume URL itself is unguessable per execution.\nconst crypto = require('crypto');\nconst plan = $('Plan approval chain').first().json;\nconst stage = plan.stages[1 - 1];\nconst secret = $env.NORDLYS_LINK_SIGNING_SECRET;\nconst sign = (d) => crypto.createHmac('sha256', secret)\n  .update([$execution.id, 1, stage.approver, d].join('|')).digest('hex');\n// n8n 2.x resume URLs already carry their own ?signature=..., so append with '&'.\nconst base = $execution.resumeUrl;\nconst link = (d) => `${base}${base.includes('?') ? '&' : '?'}stage=${1}&approver=${encodeURIComponent(stage.approver)}&decision=${d}&sig=${sign(d)}`;\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst r = plan.request;\nreturn [{ json: {\n  approver: stage.approver, role: stage.role, stage: 1,\n  approve_url: link('approved'), reject_url: link('rejected'),\n  // Requester-controlled text is HTML-escaped before it goes into an e-mail.\n  html: `<p>${esc(r.requester)} requests <b>${esc(r.requested_scope)}</b> on\n         <b>${esc(r.asset_type)} ${esc(r.asset_id)}${r.major_version ? ' v' + r.major_version : ''}</b>.</p>\n         <p>Purpose: <b>${esc(r.purpose)}</b><br>Justification: ${esc(r.justification)}</p>\n         <p>Approval route: ${esc(r.approval_route)} (stage ${1} of ${plan.stages.length}, you approve as ${esc(stage.role)}).</p>\n         <p><a href=\"${link('approved')}\">Approve</a> &nbsp;|&nbsp; <a href=\"${link('rejected')}\">Reject</a></p>\n         <p style=\"color:#666\">Link expires in ${plan.timeout_minutes} minutes. Request id ${esc(r.id)}.</p>`,\n}}];\n"
+      },
+      "notes": "[rule] HMAC-signed links",
+      "notesInFlow": true
+    },
+    {
+      "id": "18d747ac-c507-5880-ba05-8a8ad541a724",
+      "name": "E-mail approver (stage 1)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2340,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "discovery-platform@nordlys.example",
+        "toEmail": "={{ $json.approver }}",
+        "subject": "=Access request: {{ $('Plan approval chain').first().json.request.requested_scope }} for {{ $('Plan approval chain').first().json.request.requester }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "mailpit-smtp",
+          "name": "Mailpit SMTP (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[human] Approve / Reject links",
+      "notesInFlow": true
+    },
+    {
+      "id": "bac6b088-1e05-56b1-b0d9-b8fa5e642d3f",
+      "name": "Wait for decision (stage 1)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2600,
+        0
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "GET",
+        "responseMode": "onReceived",
+        "limitWaitTime": true,
+        "limitType": "afterTimeInterval",
+        "resumeAmount": "={{ $('Plan approval chain').first().json.timeout_minutes }}",
+        "resumeUnit": "minutes",
+        "options": {
+          "responseData": "Thank you - your decision was received. You can close this tab."
+        }
+      },
+      "webhookId": "d56d2860-3db6-5ddc-a922-6edbf2be8caf",
+      "notes": "[human] Pauses until a link is clicked or the timeout",
+      "notesInFlow": true
+    },
+    {
+      "id": "4f306043-7a95-5045-9e98-56013fbdf20c",
+      "name": "Verify vote (stage 1)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// [rule] Verify the clicked link. Timeout -> 'expired'. A bad signature, the wrong approver\n// or the requester approving their own request -> 'invalid' (alerts ops, decides nothing).\nconst crypto = require('crypto');\nconst plan = $('Plan approval chain').first().json;\nconst stage = plan.stages[1 - 1];\nconst q = ($json.query) || {};\nif (!q.decision) {\n  return [{ json: { vote: 'expired', stage: 1, approver: null, route: 2,\n    reason: `no decision within ${plan.timeout_minutes} minutes` } }];\n}\nconst expected = crypto.createHmac('sha256', $env.NORDLYS_LINK_SIGNING_SECRET)\n  .update([$execution.id, 1, q.approver, q.decision].join('|')).digest('hex');\nconst sigOk = typeof q.sig === 'string' && q.sig.length === expected.length &&\n  crypto.timingSafeEqual(Buffer.from(q.sig), Buffer.from(expected));\nlet vote = q.decision === 'approved' ? 'approved' : q.decision === 'rejected' ? 'rejected' : 'invalid';\nlet reason = `${q.approver} ${q.decision} at stage ${1}`;\nif (!sigOk) { vote = 'invalid'; reason = 'approval link signature invalid'; }\nelse if (q.approver !== stage.approver) { vote = 'invalid'; reason = 'approver does not match this stage'; }\nelse if (q.approver === plan.request.requester_email) { vote = 'invalid'; reason = 'requester cannot approve own request'; }\nconst last = 1 === plan.stages.length;\n// Routing for the next Switch: 0 = next stage, 1 = final approve, 2 = final reject/expire, 3 = invalid.\nconst route = vote === 'approved' ? (last ? 1 : 0) : (vote === 'invalid' ? 3 : 2);\nreturn [{ json: { vote, stage: 1, approver: vote === 'invalid' ? null : q.approver, reason, route } }];\n"
+      },
+      "notes": "[rule] signature, approver, four-eyes, timeout",
+      "notesInFlow": true
+    },
+    {
+      "id": "a488ac95-83cc-5cbc-b72b-3ad1b3a1f0be",
+      "name": "Stage 1 outcome",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        3120,
+        0
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 4,
+        "output": "={{ $json.route }}"
+      },
+      "notes": "[rule] 0 next · 1 approve · 2 reject/expire · 3 invalid",
+      "notesInFlow": true
+    },
+    {
+      "id": "aac330df-723f-5893-b5d6-d3852600e84f",
+      "name": "Sign links (stage 2)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3380,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// [rule] One approve and one reject link per approver. Each link carries an HMAC over\n// (execution id, stage, approver, decision), so a recipient cannot edit the URL to approve\n// as someone else or at another stage. The resume URL itself is unguessable per execution.\nconst crypto = require('crypto');\nconst plan = $('Plan approval chain').first().json;\nconst stage = plan.stages[2 - 1];\nconst secret = $env.NORDLYS_LINK_SIGNING_SECRET;\nconst sign = (d) => crypto.createHmac('sha256', secret)\n  .update([$execution.id, 2, stage.approver, d].join('|')).digest('hex');\n// n8n 2.x resume URLs already carry their own ?signature=..., so append with '&'.\nconst base = $execution.resumeUrl;\nconst link = (d) => `${base}${base.includes('?') ? '&' : '?'}stage=${2}&approver=${encodeURIComponent(stage.approver)}&decision=${d}&sig=${sign(d)}`;\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst r = plan.request;\nreturn [{ json: {\n  approver: stage.approver, role: stage.role, stage: 2,\n  approve_url: link('approved'), reject_url: link('rejected'),\n  // Requester-controlled text is HTML-escaped before it goes into an e-mail.\n  html: `<p>${esc(r.requester)} requests <b>${esc(r.requested_scope)}</b> on\n         <b>${esc(r.asset_type)} ${esc(r.asset_id)}${r.major_version ? ' v' + r.major_version : ''}</b>.</p>\n         <p>Purpose: <b>${esc(r.purpose)}</b><br>Justification: ${esc(r.justification)}</p>\n         <p>Approval route: ${esc(r.approval_route)} (stage ${2} of ${plan.stages.length}, you approve as ${esc(stage.role)}).</p>\n         <p><a href=\"${link('approved')}\">Approve</a> &nbsp;|&nbsp; <a href=\"${link('rejected')}\">Reject</a></p>\n         <p style=\"color:#666\">Link expires in ${plan.timeout_minutes} minutes. Request id ${esc(r.id)}.</p>`,\n}}];\n"
+      },
+      "notes": "[rule] HMAC-signed links",
+      "notesInFlow": true
+    },
+    {
+      "id": "437b53e1-5810-5e82-bccf-fe49cb7e59c4",
+      "name": "E-mail approver (stage 2)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        3640,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "discovery-platform@nordlys.example",
+        "toEmail": "={{ $json.approver }}",
+        "subject": "=Access request: {{ $('Plan approval chain').first().json.request.requested_scope }} for {{ $('Plan approval chain').first().json.request.requester }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "mailpit-smtp",
+          "name": "Mailpit SMTP (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[human] Approve / Reject links",
+      "notesInFlow": true
+    },
+    {
+      "id": "1ec47b3a-4321-5103-a302-93376ac12f55",
+      "name": "Wait for decision (stage 2)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3900,
+        0
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "GET",
+        "responseMode": "onReceived",
+        "limitWaitTime": true,
+        "limitType": "afterTimeInterval",
+        "resumeAmount": "={{ $('Plan approval chain').first().json.timeout_minutes }}",
+        "resumeUnit": "minutes",
+        "options": {
+          "responseData": "Thank you - your decision was received. You can close this tab."
+        }
+      },
+      "webhookId": "a5f3bc94-4d17-5ef7-b0d4-c7a6011aed84",
+      "notes": "[human] Pauses until a link is clicked or the timeout",
+      "notesInFlow": true
+    },
+    {
+      "id": "a39db358-fd33-5bcd-957a-f120f5217697",
+      "name": "Verify vote (stage 2)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4160,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// [rule] Verify the clicked link. Timeout -> 'expired'. A bad signature, the wrong approver\n// or the requester approving their own request -> 'invalid' (alerts ops, decides nothing).\nconst crypto = require('crypto');\nconst plan = $('Plan approval chain').first().json;\nconst stage = plan.stages[2 - 1];\nconst q = ($json.query) || {};\nif (!q.decision) {\n  return [{ json: { vote: 'expired', stage: 2, approver: null, route: 2,\n    reason: `no decision within ${plan.timeout_minutes} minutes` } }];\n}\nconst expected = crypto.createHmac('sha256', $env.NORDLYS_LINK_SIGNING_SECRET)\n  .update([$execution.id, 2, q.approver, q.decision].join('|')).digest('hex');\nconst sigOk = typeof q.sig === 'string' && q.sig.length === expected.length &&\n  crypto.timingSafeEqual(Buffer.from(q.sig), Buffer.from(expected));\nlet vote = q.decision === 'approved' ? 'approved' : q.decision === 'rejected' ? 'rejected' : 'invalid';\nlet reason = `${q.approver} ${q.decision} at stage ${2}`;\nif (!sigOk) { vote = 'invalid'; reason = 'approval link signature invalid'; }\nelse if (q.approver !== stage.approver) { vote = 'invalid'; reason = 'approver does not match this stage'; }\nelse if (q.approver === plan.request.requester_email) { vote = 'invalid'; reason = 'requester cannot approve own request'; }\nconst last = 2 === plan.stages.length;\n// Routing for the next Switch: 0 = next stage, 1 = final approve, 2 = final reject/expire, 3 = invalid.\nconst route = vote === 'approved' ? (last ? 1 : 0) : (vote === 'invalid' ? 3 : 2);\nreturn [{ json: { vote, stage: 2, approver: vote === 'invalid' ? null : q.approver, reason, route } }];\n"
+      },
+      "notes": "[rule] signature, approver, four-eyes, timeout",
+      "notesInFlow": true
+    },
+    {
+      "id": "96b6127d-3981-561d-afc1-6c21226c9e17",
+      "name": "Stage 2 outcome",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        4420,
+        0
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 4,
+        "output": "={{ $json.route }}"
+      },
+      "notes": "[rule] 0 next · 1 approve · 2 reject/expire · 3 invalid",
+      "notesInFlow": true
+    },
+    {
+      "id": "63c9ccd2-aaeb-5ac9-9c0c-d980cd678f44",
+      "name": "Final decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4680,
+        180
+      ],
+      "parameters": {
+        "jsCode": "// [rule] Combine the stage votes into one decision. Only humans approve: 'approved' requires\n// every stage to have been approved by a verified approver link.\nconst plan = $('Plan approval chain').first().json;\nconst votes = [];\nfor (const n of [1, 2]) {\n  try { votes.push($(`Verify vote (stage ${n})`).first().json); } catch (e) { /* stage not run */ }\n}\nconst last = votes[votes.length - 1];\nconst approved = votes.length === plan.stages.length && votes.every((v) => v.vote === 'approved');\nconst expired = last && last.vote === 'expired';\nconst decided_by = approved || !expired ? last.approver : 'workflow-timeout@nordlys.example';\nconst note = approved\n  ? `Approved by ${votes.map((v) => v.approver).join(' and ')} via n8n workflow A`\n  : expired ? `Expired: ${last.reason}` : `Rejected by ${last.approver} at stage ${last.stage}`;\nreturn [{ json: { decision: approved ? 'approved' : 'rejected', decided_by, note, expired: !!expired,\n  request: plan.request, votes } }];\n"
+      },
+      "notes": "[rule] all stages approved -> approved",
+      "notesInFlow": true
+    },
+    {
+      "id": "3cdf9377-b4f8-577f-9e66-82ec51014b0d",
+      "name": "Fresh service token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4940,
+        180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NORDLYS_TOKEN_URL }}",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "={{ $env.NORDLYS_N8N_CLIENT_ID }}"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $env.NORDLYS_N8N_CLIENT_SECRET }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system] The first token expired while we waited for humans",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "2d814f14-3309-5c62-9d8e-a6b42d10a672",
+      "name": "Record decision in catalog",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5200,
+        180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NORDLYS_CATALOG_URL }}/v1/access-requests/{{ $('Final decision').first().json.request.id }}/decision",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            },
+            {
+              "name": "X-On-Behalf-Of-Subject",
+              "value": "={{ $('Final decision').first().json.decided_by }}"
+            },
+            {
+              "name": "X-On-Behalf-Of-Scopes",
+              "value": "access.approve"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"decided_by\": $(\"Final decision\").first().json.decided_by, \"decision\": $(\"Final decision\").first().json.decision, \"note\": $(\"Final decision\").first().json.note } }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system] Catalog enforces four-eyes + audits the decision",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "a7c54e73-f6b0-51d8-8c2a-0efc44097bda",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5460,
+        180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "25b03fb0-560e-5913-80d5-114c4ce847ad",
+              "leftValue": "={{ $(\"Final decision\").first().json.decision === \"approved\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "[rule]",
+      "notesInFlow": true
+    },
+    {
+      "id": "55cf436e-0d34-5f6a-bf12-cd7a13fea306",
+      "name": "Find requester in IdP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5720,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.NORDLYS_KEYCLOAK_ADMIN_URL }}/users?exact=true&username={{ encodeURIComponent($('Final decision').first().json.request.requester) }}",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Fresh service token').first().json.access_token }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system] Keycloak Admin API (Entra: Microsoft Graph)",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "d91a2b7b-19a8-5494-86ce-912334f5f610",
+      "name": "Ensure role exists",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5980,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NORDLYS_KEYCLOAK_ADMIN_URL }}/roles",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Fresh service token').first().json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"name\": $(\"Final decision\").first().json.request.requested_scope, \"description\": \"Granted via approved access requests\" } }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system] 201 created or 409 already exists - both fine",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "48203169-689f-5df4-86f0-80c3916eaf9a",
+      "name": "Get role",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6240,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.NORDLYS_KEYCLOAK_ADMIN_URL }}/roles/{{ encodeURIComponent($('Final decision').first().json.request.requested_scope) }}",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Fresh service token').first().json.access_token }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system]",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "e72acc5c-4c03-542c-bbe5-f539e69fd61d",
+      "name": "Grant role to requester",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6500,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NORDLYS_KEYCLOAK_ADMIN_URL }}/users/{{ $('Find requester in IdP').first().json.id }}/role-mappings/realm",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Fresh service token').first().json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ [ { \"id\": $(\"Get role\").first().json.id, \"name\": $(\"Get role\").first().json.name } ] }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system] The actual grant - only after human approval",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "5e4fcde5-fb04-583e-aefd-7272720bd872",
+      "name": "Audit: access granted",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6760,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NORDLYS_CATALOG_URL }}/v1/audit-events",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Fresh service token').first().json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"actor\": $(\"Final decision\").first().json.decided_by, \"action\": \"access_grant.applied\", \"resource\": \"idp-role:\" + $(\"Final decision\").first().json.request.requested_scope, \"decision\": \"approved\", \"reason\": \"role assigned to \" + $(\"Final decision\").first().json.request.requester, \"request_id\": $(\"Final decision\").first().json.request.id, \"details\": { \"idp\": \"keycloak\", \"workflow_execution\": $execution.id } } }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system] Append-only audit log",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "010ff7ea-2f50-55c6-9771-f4106573fdac",
+      "name": "Notify requester",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        7020,
+        180
+      ],
+      "parameters": {
+        "fromEmail": "discovery-platform@nordlys.example",
+        "toEmail": "={{ $('Final decision').first().json.request.requester_email }}",
+        "subject": "=Your access request for {{ $('Final decision').first().json.request.requested_scope }} was {{ $('Final decision').first().json.decision }}",
+        "emailFormat": "html",
+        "html": "=<p>Your request for <b>{{ $('Final decision').first().json.request.requested_scope }}</b> ({{ $('Final decision').first().json.request.asset_id }}) was <b>{{ $('Final decision').first().json.decision }}</b>.</p><p>{{ $('Final decision').first().json.note }}</p><p>{{ $('Final decision').first().json.decision === 'approved' ? 'Request a new token to use the new access.' : '' }}</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "mailpit-smtp",
+          "name": "Mailpit SMTP (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system] Close the loop with the requester",
+      "notesInFlow": true
+    },
+    {
+      "id": "dc83971a-1c90-50e6-86ad-54229d9612ca",
+      "name": "Describe failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5720,
+        540
+      ],
+      "parameters": {
+        "jsCode": "// [rule] Any failed call ends here: describe it for humans and for the audit log.\n// The access request is untouched (still pending or already decided), so nothing is lost.\nconst input = $input.first().json;\nlet request_id = null;\ntry { request_id = $('Verify signature & payload').first().json.request.id; } catch (e) {}\nconst what = input.unroutable ? `no approver for ${input.unroutable.join(', ')}`\n  : input.vote === 'invalid' ? input.reason\n  : (input.error && (input.error.message || JSON.stringify(input.error))) || 'unknown error';\nreturn [{ json: { request_id, what: String(what).slice(0, 500), execution: $execution.id } }];\n"
+      },
+      "notes": "[rule] error branch",
+      "notesInFlow": true
+    },
+    {
+      "id": "90498649-dff9-5d02-b293-7188f7158caf",
+      "name": "Alert platform ops",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        5980,
+        540
+      ],
+      "parameters": {
+        "fromEmail": "discovery-platform@nordlys.example",
+        "toEmail": "={{ $env.NORDLYS_OPS_EMAIL }}",
+        "subject": "=Access workflow needs attention: {{ $json.request_id }}",
+        "emailFormat": "html",
+        "html": "=<p>Workflow A could not complete for access request {{ $json.request_id }}.</p><p>{{ $json.what }}</p><p>n8n execution {{ $json.execution }}. The request has not been decided automatically.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "mailpit-smtp",
+          "name": "Mailpit SMTP (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[human] Ops takes over",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "Sign links (stage 1)": {
+      "main": [
+        [
+          {
+            "node": "E-mail approver (stage 1)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "E-mail approver (stage 1)": {
+      "main": [
+        [
+          {
+            "node": "Wait for decision (stage 1)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for decision (stage 1)": {
+      "main": [
+        [
+          {
+            "node": "Verify vote (stage 1)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify vote (stage 1)": {
+      "main": [
+        [
+          {
+            "node": "Stage 1 outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign links (stage 2)": {
+      "main": [
+        [
+          {
+            "node": "E-mail approver (stage 2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "E-mail approver (stage 2)": {
+      "main": [
+        [
+          {
+            "node": "Wait for decision (stage 2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for decision (stage 2)": {
+      "main": [
+        [
+          {
+            "node": "Verify vote (stage 2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify vote (stage 2)": {
+      "main": [
+        [
+          {
+            "node": "Stage 2 outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Access request created": {
+      "main": [
+        [
+          {
+            "node": "Verify signature & payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature & payload": {
+      "main": [
+        [
+          {
+            "node": "Valid event?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid event?": {
+      "main": [
+        [
+          {
+            "node": "Accept (202)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject (401)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accept (202)": {
+      "main": [
+        [
+          {
+            "node": "Service token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Service token": {
+      "main": [
+        [
+          {
+            "node": "Re-read request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-read request": {
+      "main": [
+        [
+          {
+            "node": "Plan approval chain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan approval chain": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Sign links (stage 1)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already decided",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 1 outcome": {
+      "main": [
+        [
+          {
+            "node": "Sign links (stage 2)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Final decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Final decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 2 outcome": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Final decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Final decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final decision": {
+      "main": [
+        [
+          {
+            "node": "Fresh service token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fresh service token": {
+      "main": [
+        [
+          {
+            "node": "Record decision in catalog",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record decision in catalog": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Find requester in IdP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify requester",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find requester in IdP": {
+      "main": [
+        [
+          {
+            "node": "Ensure role exists",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure role exists": {
+      "main": [
+        [
+          {
+            "node": "Get role",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get role": {
+      "main": [
+        [
+          {
+            "node": "Grant role to requester",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Grant role to requester": {
+      "main": [
+        [
+          {
+            "node": "Audit: access granted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit: access granted": {
+      "main": [
+        [
+          {
+            "node": "Notify requester",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe failure": {
+      "main": [
+        [
+          {
+            "node": "Alert platform ops",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "errorWorkflow": "3c9ff3aaa0225ab4"
+  },
+  "pinData": {},
+  "tags": []
+}
