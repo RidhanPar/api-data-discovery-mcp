@@ -1,5 +1,5 @@
 comma := ,
-.PHONY: install model db migrate ingest serve mcp mcp-demo search catalog generate test test-unit lint check down up image workflows demo-access-flow
+.PHONY: install model db migrate ingest serve mcp mcp-demo search catalog generate test test-unit lint check down up image workflows demo-access-flow eval-retrieval eval-retrieval-ci eval-agent
 
 install:
 	uv sync
@@ -64,3 +64,12 @@ workflows:        ## regenerate the n8n workflow JSON from deploy/n8n/build_work
 
 demo-access-flow: ## Workflow A end to end: request over MCP -> e-mail -> approve -> role granted
 	uv run python scripts/demo_access_flow.py --reset
+
+eval-retrieval:   ## retrieval eval (no LLM): lexical vs vector vs hybrid, +/- deprecation demotion
+	uv run python -m eval.retrieval
+
+eval-retrieval-ci: ## CI regression gate on the small subset
+	uv run python -m eval.retrieval --subset ci --min-recall3 0.75 --min-mrr 0.75
+
+eval-agent:       ## agent eval with an LLM judge (needs NORDLYS_LLM_PROVIDER + credentials)
+	uv run python -m eval.agent_eval --judge

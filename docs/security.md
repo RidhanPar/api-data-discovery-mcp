@@ -25,6 +25,23 @@ from allow-listed clients (`nordlys-mcp-server`, `nordlys-n8n`). In production t
 pattern uses a token exchange (RFC 8693 / Entra ID on-behalf-of), so the user identity is
 signed by the IdP rather than asserted by a trusted service (see ADR 0004).
 
+**The discovery agent is a least-privilege MCP client.** `/v1/ask` (agent service) calls
+the MCP server with the agent's own client-credentials token
+(`nordlys-discovery-agent`). That identity holds the tool scopes but **no data-product
+scopes**, so the agent can only ever see what every employee may see: metadata,
+contracts and access requirements, never sample rows of personal or sensitive data. The
+agent is offered every read-only tool but not `request_access`; filing a request stays a
+deliberate user action. MCP audit events name the agent's service account; the agent
+service logs which user asked. Users are rate-limited per user in the agent service,
+because to the MCP server the agent is one caller.
+
+Per-user delegation is the next step and is not implemented: the agent would exchange
+the user's token (`aud=nordlys-agent`) for an MCP token for the same user (RFC 8693
+token exchange in Keycloak; Entra ID on-behalf-of in Azure), so the MCP guard and audit
+see the real user and their own grants. It needs token exchange enabled for the agent
+client in the IdP, which is an identity-administration change and was deliberately not
+made from this build.
+
 ## Authorisation: policy as code
 
 All rules live in `src/nordlys_discovery/security/policy.py` and `access/policy.py`, as pure

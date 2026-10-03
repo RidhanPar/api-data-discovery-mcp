@@ -1,0 +1,606 @@
+{
+  "generated_by": "eval/retrieval.py",
+  "subset": "ci",
+  "embedding_model": "onnx:bge-small-en-v1.5-q:846e649cf411",
+  "catalog": {
+    "apis": {
+      "added": 0,
+      "updated": 0,
+      "unchanged": 25,
+      "deleted": 0
+    },
+    "data_products": {
+      "added": 0,
+      "updated": 0,
+      "unchanged": 15,
+      "deleted": 0
+    }
+  },
+  "k": 10,
+  "metrics": {
+    "lexical": {
+      "questions": 9,
+      "recall@1": 0.444,
+      "recall@3": 0.556,
+      "recall@10": 0.889,
+      "mrr@10": 0.578,
+      "trap_ranked_above_answer": "2/3",
+      "latency_ms_p50": 27.9,
+      "latency_ms_p95": 30.4
+    },
+    "vector": {
+      "questions": 9,
+      "recall@1": 0.556,
+      "recall@3": 0.889,
+      "recall@10": 1.0,
+      "mrr@10": 0.731,
+      "trap_ranked_above_answer": "1/3",
+      "latency_ms_p50": 26.5,
+      "latency_ms_p95": 30.6
+    },
+    "hybrid": {
+      "questions": 9,
+      "recall@1": 0.667,
+      "recall@3": 0.778,
+      "recall@10": 1.0,
+      "mrr@10": 0.772,
+      "trap_ranked_above_answer": "1/3",
+      "latency_ms_p50": 37.8,
+      "latency_ms_p95": 40.1
+    },
+    "vector+demote": {
+      "questions": 9,
+      "recall@1": 0.667,
+      "recall@3": 1.0,
+      "recall@10": 1.0,
+      "mrr@10": 0.796,
+      "trap_ranked_above_answer": "0/3",
+      "latency_ms_p50": 18.8,
+      "latency_ms_p95": 20.0
+    },
+    "hybrid+demote": {
+      "questions": 9,
+      "recall@1": 0.667,
+      "recall@3": 0.778,
+      "recall@10": 1.0,
+      "mrr@10": 0.778,
+      "trap_ranked_above_answer": "0/3",
+      "latency_ms_p50": 37.2,
+      "latency_ms_p95": 40.5
+    }
+  },
+  "recall@3_by_category": {
+    "findable_api": {
+      "lexical": 0.4,
+      "vector": 1.0,
+      "hybrid": 0.8,
+      "vector+demote": 1.0,
+      "hybrid+demote": 0.8
+    },
+    "data_product": {
+      "lexical": 1.0,
+      "vector": 1.0,
+      "hybrid": 1.0,
+      "vector+demote": 1.0,
+      "hybrid+demote": 1.0
+    },
+    "deprecated_trap": {
+      "lexical": 0.0,
+      "vector": 1.0,
+      "hybrid": 0.0,
+      "vector+demote": 1.0,
+      "hybrid+demote": 0.0
+    },
+    "near_duplicate": {
+      "lexical": 1.0,
+      "vector": 0.0,
+      "hybrid": 1.0,
+      "vector+demote": 1.0,
+      "hybrid+demote": 1.0
+    },
+    "access_restricted": {
+      "lexical": 1.0,
+      "vector": 1.0,
+      "hybrid": 1.0,
+      "vector+demote": 1.0,
+      "hybrid+demote": 1.0
+    }
+  },
+  "details": [
+    {
+      "mode": "lexical",
+      "id": "q01",
+      "category": "findable_api",
+      "rank": 4,
+      "top3": [
+        "api:motor-policy-api:1",
+        "api:claim-lookup-api:1",
+        "dp:claims-open-cases-daily"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "id": "q02",
+      "category": "findable_api",
+      "rank": 4,
+      "top3": [
+        "api:claim-lookup-api:1",
+        "api:claims-api:2",
+        "api:claims-search-api:1"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "id": "q04",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:quote-api:2",
+        "dp:motor-telematics-trips",
+        "api:quote-api:1"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "id": "q06",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:identity-verification-api:1",
+        "api:broker-portfolio-api:1",
+        "api:customer-api:2"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "id": "q14",
+      "category": "findable_api",
+      "rank": 5,
+      "top3": [
+        "api:premium-invoice-api:1",
+        "api:payment-methods-api:1",
+        "dp:customer-360-profile"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "id": "q20",
+      "category": "data_product",
+      "rank": 1,
+      "top3": [
+        "dp:claims-open-cases-daily",
+        "dp:policy-inforce-portfolio",
+        "api:claim-lookup-api:1"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "id": "q30",
+      "category": "deprecated_trap",
+      "rank": null,
+      "top3": [
+        "api:customer-api:2",
+        "dp:policy-inforce-portfolio",
+        "api:policy-api:1"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "id": "q36",
+      "category": "near_duplicate",
+      "rank": 2,
+      "top3": [
+        "api:identity-verification-api:1",
+        "api:claim-lookup-api:1",
+        "dp:customer-consent-status"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "id": "q37",
+      "category": "access_restricted",
+      "rank": 1,
+      "top3": [
+        "dp:claims-fraud-scores",
+        "api:fraud-signals-api:1",
+        "dp:customer-360-profile"
+      ]
+    },
+    {
+      "mode": "vector",
+      "id": "q01",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:claims-search-api:1",
+        "api:claims-api:1",
+        "api:claim-lookup-api:1"
+      ]
+    },
+    {
+      "mode": "vector",
+      "id": "q02",
+      "category": "findable_api",
+      "rank": 3,
+      "top3": [
+        "api:claim-lookup-api:1",
+        "api:claims-api:2",
+        "api:fnol-api:1"
+      ]
+    },
+    {
+      "mode": "vector",
+      "id": "q04",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:quote-api:2",
+        "api:motor-policy-api:1",
+        "api:travel-quote-api:1"
+      ]
+    },
+    {
+      "mode": "vector",
+      "id": "q06",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:identity-verification-api:1",
+        "api:customer-api:2",
+        "api:fraud-signals-api:1"
+      ]
+    },
+    {
+      "mode": "vector",
+      "id": "q14",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:customer-consent-api:1",
+        "api:customer-api:2",
+        "dp:customer-consent-status"
+      ]
+    },
+    {
+      "mode": "vector",
+      "id": "q20",
+      "category": "data_product",
+      "rank": 1,
+      "top3": [
+        "dp:claims-open-cases-daily",
+        "api:claims-search-api:1",
+        "api:claims-api:2"
+      ]
+    },
+    {
+      "mode": "vector",
+      "id": "q30",
+      "category": "deprecated_trap",
+      "rank": 2,
+      "top3": [
+        "api:policy-api:1",
+        "api:policy-api:2",
+        "api:policy-endorsement-api:1"
+      ]
+    },
+    {
+      "mode": "vector",
+      "id": "q36",
+      "category": "near_duplicate",
+      "rank": 4,
+      "top3": [
+        "api:claims-api:2",
+        "api:claims-search-api:1",
+        "api:claims-api:1"
+      ]
+    },
+    {
+      "mode": "vector",
+      "id": "q37",
+      "category": "access_restricted",
+      "rank": 2,
+      "top3": [
+        "api:fraud-signals-api:1",
+        "dp:claims-fraud-scores",
+        "api:claims-search-api:1"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "id": "q01",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:claims-search-api:1",
+        "api:claims-api:1",
+        "api:claim-lookup-api:1"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "id": "q02",
+      "category": "findable_api",
+      "rank": 4,
+      "top3": [
+        "api:claim-lookup-api:1",
+        "api:claims-api:2",
+        "api:claims-search-api:1"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "id": "q04",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:quote-api:2",
+        "api:quote-api:1",
+        "api:travel-quote-api:1"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "id": "q06",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:identity-verification-api:1",
+        "api:customer-api:2",
+        "api:customer-consent-api:1"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "id": "q14",
+      "category": "findable_api",
+      "rank": 2,
+      "top3": [
+        "api:premium-invoice-api:1",
+        "api:customer-consent-api:1",
+        "dp:customer-consent-status"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "id": "q20",
+      "category": "data_product",
+      "rank": 1,
+      "top3": [
+        "dp:claims-open-cases-daily",
+        "api:claims-search-api:1",
+        "api:claim-lookup-api:1"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "id": "q30",
+      "category": "deprecated_trap",
+      "rank": 5,
+      "top3": [
+        "api:policy-api:1",
+        "dp:policy-inforce-portfolio",
+        "api:customer-api:2"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "id": "q36",
+      "category": "near_duplicate",
+      "rank": 1,
+      "top3": [
+        "api:claim-lookup-api:1",
+        "api:claims-search-api:1",
+        "api:claims-api:2"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "id": "q37",
+      "category": "access_restricted",
+      "rank": 1,
+      "top3": [
+        "dp:claims-fraud-scores",
+        "api:fraud-signals-api:1",
+        "api:claims-search-api:1"
+      ]
+    },
+    {
+      "mode": "vector+demote",
+      "id": "q01",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:claims-search-api:1",
+        "api:claim-lookup-api:1",
+        "api:claims-api:2"
+      ]
+    },
+    {
+      "mode": "vector+demote",
+      "id": "q02",
+      "category": "findable_api",
+      "rank": 3,
+      "top3": [
+        "api:claim-lookup-api:1",
+        "api:claims-api:2",
+        "api:fnol-api:1"
+      ]
+    },
+    {
+      "mode": "vector+demote",
+      "id": "q04",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:quote-api:2",
+        "api:motor-policy-api:1",
+        "api:travel-quote-api:1"
+      ]
+    },
+    {
+      "mode": "vector+demote",
+      "id": "q06",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:identity-verification-api:1",
+        "api:customer-api:2",
+        "api:fraud-signals-api:1"
+      ]
+    },
+    {
+      "mode": "vector+demote",
+      "id": "q14",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:customer-consent-api:1",
+        "api:customer-api:2",
+        "dp:customer-consent-status"
+      ]
+    },
+    {
+      "mode": "vector+demote",
+      "id": "q20",
+      "category": "data_product",
+      "rank": 1,
+      "top3": [
+        "dp:claims-open-cases-daily",
+        "api:claims-search-api:1",
+        "api:claims-api:2"
+      ]
+    },
+    {
+      "mode": "vector+demote",
+      "id": "q30",
+      "category": "deprecated_trap",
+      "rank": 1,
+      "top3": [
+        "api:policy-api:2",
+        "api:policy-endorsement-api:1",
+        "dp:policy-inforce-portfolio"
+      ]
+    },
+    {
+      "mode": "vector+demote",
+      "id": "q36",
+      "category": "near_duplicate",
+      "rank": 3,
+      "top3": [
+        "api:claims-api:2",
+        "api:claims-search-api:1",
+        "api:claim-lookup-api:1"
+      ]
+    },
+    {
+      "mode": "vector+demote",
+      "id": "q37",
+      "category": "access_restricted",
+      "rank": 2,
+      "top3": [
+        "api:fraud-signals-api:1",
+        "dp:claims-fraud-scores",
+        "api:claims-search-api:1"
+      ]
+    },
+    {
+      "mode": "hybrid+demote",
+      "id": "q01",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:claims-search-api:1",
+        "api:claim-lookup-api:1",
+        "api:claims-api:2"
+      ]
+    },
+    {
+      "mode": "hybrid+demote",
+      "id": "q02",
+      "category": "findable_api",
+      "rank": 4,
+      "top3": [
+        "api:claim-lookup-api:1",
+        "api:claims-api:2",
+        "api:claims-search-api:1"
+      ]
+    },
+    {
+      "mode": "hybrid+demote",
+      "id": "q04",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:quote-api:2",
+        "api:travel-quote-api:1",
+        "api:motor-policy-api:1"
+      ]
+    },
+    {
+      "mode": "hybrid+demote",
+      "id": "q06",
+      "category": "findable_api",
+      "rank": 1,
+      "top3": [
+        "api:identity-verification-api:1",
+        "api:customer-api:2",
+        "api:customer-consent-api:1"
+      ]
+    },
+    {
+      "mode": "hybrid+demote",
+      "id": "q14",
+      "category": "findable_api",
+      "rank": 2,
+      "top3": [
+        "api:premium-invoice-api:1",
+        "api:customer-consent-api:1",
+        "dp:customer-consent-status"
+      ]
+    },
+    {
+      "mode": "hybrid+demote",
+      "id": "q20",
+      "category": "data_product",
+      "rank": 1,
+      "top3": [
+        "dp:claims-open-cases-daily",
+        "api:claims-search-api:1",
+        "api:claim-lookup-api:1"
+      ]
+    },
+    {
+      "mode": "hybrid+demote",
+      "id": "q30",
+      "category": "deprecated_trap",
+      "rank": 4,
+      "top3": [
+        "dp:policy-inforce-portfolio",
+        "api:customer-api:2",
+        "dp:broker-commission-statements"
+      ]
+    },
+    {
+      "mode": "hybrid+demote",
+      "id": "q36",
+      "category": "near_duplicate",
+      "rank": 1,
+      "top3": [
+        "api:claim-lookup-api:1",
+        "api:claims-search-api:1",
+        "api:claims-api:2"
+      ]
+    },
+    {
+      "mode": "hybrid+demote",
+      "id": "q37",
+      "category": "access_restricted",
+      "rank": 1,
+      "top3": [
+        "dp:claims-fraud-scores",
+        "api:fraud-signals-api:1",
+        "api:claims-search-api:1"
+      ]
+    }
+  ]
+}

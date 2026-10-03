@@ -49,7 +49,9 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("NORDLYS_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")
     )
-    anthropic_model: str = "claude-sonnet-5-5"
+    anthropic_model: str = "claude-opus-5-5"
+    anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    anthropic_fallbacks: bool = True  # server-side refusal fallbacks (beta)
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4.1-mini"
 
@@ -58,6 +60,7 @@ class Settings(BaseSettings):
     rrf_k: int = Field(60, description="Reciprocal-rank-fusion constant (Cormack et al., 2009).")
     bm25_k1: float = 1.2
     bm25_b: float = 0.75
+    search_deprecated_penalty: float = 0.5
 
     # MCP server (Phase 3).
     catalog_api_url: str = "http://localhost:8000"
@@ -85,6 +88,14 @@ class Settings(BaseSettings):
     mcp_client_secret: SecretStr | None = None
     rate_limit_per_minute: int = 60
     rate_limit_burst: int = 20
+    # Agent service -> MCP server. The agent calls MCP with its own service identity
+    # (client credentials), which holds no asset scopes: it only ever sees what any
+    # employee may see. Per-user delegation (RFC 8693 token exchange) is documented in
+    # docs/security.md as the next step.
+    agent_mcp_url: str = "http://localhost:8001/mcp"
+    agent_client_id: str = "nordlys-discovery-agent"
+    agent_client_secret: SecretStr | None = None
+    agent_max_steps: int = 8
     # Workflow A: request_access notifies n8n (empty = no workflow, request just stays pending).
     access_request_webhook_url: str | None = None
     access_request_webhook_secret: SecretStr | None = None

@@ -113,6 +113,9 @@ services:
       NORDLYS_AZURE_OPENAI_CHAT_DEPLOYMENT: ${NORDLYS_AZURE_OPENAI_CHAT_DEPLOYMENT:-gpt-4.1-mini}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       NORDLYS_OPENAI_API_KEY: ${NORDLYS_OPENAI_API_KEY:-}
+      # /v1/ask: the agent calls the MCP server with its own least-privilege identity.
+      NORDLYS_AGENT_MCP_URL: http://mcp:8001/mcp
+      NORDLYS_AGENT_CLIENT_SECRET: ${AGENT_CLIENT_SECRET:-local-agent-secret-change-me}
     ports: ["8002:8002"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health/live', timeout=2)"]

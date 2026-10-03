@@ -109,7 +109,11 @@ def create_app(
     # Every /v1 route requires an authenticated service; health probes stay public.
     v1 = APIRouter(dependencies=[Depends(call_context)])
     params = SearchParams(
-        candidates=settings.search_candidates, rrf_k=settings.rrf_k, bm25_k1=settings.bm25_k1, bm25_b=settings.bm25_b
+        candidates=settings.search_candidates,
+        rrf_k=settings.rrf_k,
+        bm25_k1=settings.bm25_k1,
+        bm25_b=settings.bm25_b,
+        deprecated_penalty=settings.search_deprecated_penalty,
     )
 
     # ------------------------------------------------------------------ plumbing

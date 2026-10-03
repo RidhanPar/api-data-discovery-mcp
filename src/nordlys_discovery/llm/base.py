@@ -44,6 +44,10 @@ class Message:
     tool_calls: list[ToolCall] = field(default_factory=list)  # assistant only
     tool_call_id: str | None = None  # tool only
     name: str | None = None  # tool only
+    # Assistant only: the provider's own content blocks for this turn. Providers that sign
+    # reasoning (Anthropic thinking blocks) need the turn replayed unchanged, so the
+    # neutral fields above are not enough to rebuild it.
+    raw: Any = None
 
 
 @dataclass(frozen=True)
@@ -61,10 +65,18 @@ class ChatResult:
     tool_calls: list[ToolCall]
     usage: Usage
     model: str  # "<provider>:<model or deployment>", recorded with every result
-    stop_reason: str
+    stop_reason: str  # "refusal" = the model declined; callers treat it as a refusal, not an error
+    raw: Any = None  # provider-native assistant content, to put on the Message that replays this turn
+
+    def as_message(self) -> Message:
+        return Message("assistant", self.text, list(self.tool_calls), raw=self.raw)
 
 
 class LLMProvider(Protocol):
+    """`force_tool` asks for the reply to be a call to that tool. OpenAI-style APIs enforce
+    it; on Anthropic models that reject forced tool_choice it is an instruction, so callers
+    must check the reply (structured() does)."""
+
     @property
     def model_id(self) -> str: ...
 
@@ -76,33 +88,38 @@ class LLMProvider(Protocol):
         *,
         force_tool: str | None = None,
         max_tokens: int = 1024,
-        temperature: float = 0.0,
     ) -> ChatResult: ...
 
 
 async def structured[M: BaseModel](
     llm: LLMProvider, system: str, user: str, schema: type[M], *, max_tokens: int = 1024
 ) -> tuple[M, ChatResult]:
-    """Get an instance of `schema` from the model by forcing a single tool call.
+    """Get an instance of `schema` from the model through a single `submit` tool call.
 
     Tool calling is the one structured-output mechanism all three providers support, so
     this works the same on Azure OpenAI, OpenAI and Anthropic. Output is validated with
-    Pydantic; one repair attempt is made if validation fails.
+    Pydantic; one repair attempt is made if the call is missing or invalid. A refusal is
+    raised as LLMError and never retried.
     """
     tool = ToolSpec(name="submit", description=f"Submit the {schema.__name__}.", parameters=schema.model_json_schema())
     messages = [Message("user", user)]
     for attempt in range(2):
         result = await llm.chat(system, messages, [tool], force_tool="submit", max_tokens=max_tokens)
+        if result.stop_reason == "refusal":
+            raise LLMError(f"{result.model} refused the request")
         call = next((c for c in result.tool_calls if c.name == "submit"), None)
         if call is None:
-            raise LLMError(f"{llm.model_id} did not call the submit tool")
+            if attempt == 1:
+                raise LLMError(f"{result.model} did not call the submit tool")
+            messages += [result.as_message(), Message("user", "Reply only by calling the submit tool.")]
+            continue
         try:
             return schema.model_validate(call.arguments), result
         except ValidationError as exc:
             if attempt == 1:
-                raise LLMError(f"{llm.model_id} returned invalid {schema.__name__}: {exc}") from exc
+                raise LLMError(f"{result.model} returned invalid {schema.__name__}: {exc}") from exc
             messages += [
-                Message("assistant", "", [call]),
+                result.as_message(),
                 Message(
                     "tool",
                     f"Invalid: {exc}. Call submit again with valid arguments.",

@@ -1,0 +1,15 @@
+# USD per million tokens, used by eval/agent_eval.py to turn measured token counts into cost.
+# Cost is only reported for models listed here; anything else is reported as "unknown",
+# never guessed. Update the rates from the provider's price page before quoting a number.
+#
+# Anthropic: first-party Claude API list prices (no batch or caching discount),
+#   as recorded in the Claude API reference used to build this project, cached 2026-09-25.
+# Azure OpenAI / OpenAI: fill in from your Azure region's price sheet or the OpenAI price
+#   page; left null on purpose because no rate was verified while writing this file.
+source_checked: "2026-09-25"
+models:
+  anthropic:claude-opus-5-5:   {input: 4.00, output: 20.00}
+  anthropic:claude-sonnet-5-5: {input: 2.00, output: 10.00}
+  anthropic:claude-haiku-4-5:  {input: 1.00, output: 5.00}
+  azure-openai:gpt-4.1-mini:   {input: null, output: null}
+  openai:gpt-4.1-mini:         {input: null, output: null}

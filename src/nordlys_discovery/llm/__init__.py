@@ -51,6 +51,8 @@ def create_llm(settings: Settings) -> LLMProvider:
             return AnthropicProvider(
                 api_key=settings.anthropic_api_key.get_secret_value(),
                 model=settings.anthropic_model,
+                effort=settings.anthropic_effort,
+                fallbacks=settings.anthropic_fallbacks,
                 timeout_s=settings.llm_timeout_s,
             )
         case "openai":

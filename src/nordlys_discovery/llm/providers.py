@@ -16,10 +16,12 @@ from .base import ChatResult, LLMError, Message, ToolCall, ToolSpec, Usage, dump
 class OpenAICompatible:
     """OpenAI chat completions API; also used for Azure OpenAI."""
 
-    def __init__(self, client: Any, model: str, provider: str) -> None:
+    def __init__(self, client: Any, model: str, provider: str, *, temperature: float | None = 0.0) -> None:
         self._client = client
         self._model = model
         self._provider = provider
+        # 0 for repeatable evals; None for reasoning deployments that reject the parameter.
+        self._temperature = temperature
 
     @classmethod
     def azure(
@@ -101,14 +103,14 @@ class OpenAICompatible:
         *,
         force_tool: str | None = None,
         max_tokens: int = 1024,
-        temperature: float = 0.0,
     ) -> ChatResult:
         kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": self._messages(system, messages),
             "max_completion_tokens": max_tokens,
-            "temperature": temperature,
         }
+        if self._temperature is not None:
+            kwargs["temperature"] = self._temperature
         if tools:
             kwargs["tools"] = [
                 {
@@ -132,15 +134,45 @@ class OpenAICompatible:
                 args = {"_unparseable": c.function.arguments}
             calls.append(ToolCall(c.id, c.function.name, args))
         usage = Usage(getattr(resp.usage, "prompt_tokens", 0) or 0, getattr(resp.usage, "completion_tokens", 0) or 0)
-        return ChatResult(choice.message.content or "", calls, usage, self.model_id, str(choice.finish_reason))
+        stop = "refusal" if getattr(choice.message, "refusal", None) else str(choice.finish_reason)
+        return ChatResult(choice.message.content or "", calls, usage, self.model_id, stop)
 
 
 class AnthropicProvider:
-    def __init__(self, *, api_key: str, model: str, timeout_s: float = 60.0, max_retries: int = 3) -> None:
+    """Claude through the Messages API, following the rules of current models:
+
+    * no sampling parameters (temperature is rejected) and adaptive thinking, with the
+      effort level set explicitly;
+    * no forced tool_choice (rejected while thinking): `force_tool` becomes an instruction
+      and the caller checks the reply;
+    * assistant turns are replayed with their original content blocks (`Message.raw`),
+      because thinking blocks must come back unchanged in a tool loop;
+    * server-side refusal fallbacks are enabled (`fallbacks="default"`): if the requested
+      model declines, Anthropic retries on a fallback model, and the result records the
+      model that actually answered.
+    """
+
+    BETAS = ("server-side-fallback-2026-07-01",)
+    # Thinking shares max_tokens with the visible answer; this headroom keeps the caller's
+    # budget for the answer itself.
+    THINKING_HEADROOM = 8192
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        effort: str = "medium",
+        fallbacks: bool = True,
+        timeout_s: float = 60.0,
+        max_retries: int = 3,
+    ) -> None:
         from anthropic import AsyncAnthropic
 
         self._client = AsyncAnthropic(api_key=api_key, timeout=timeout_s, max_retries=max_retries)
         self._model = model
+        self._effort = effort
+        self._fallbacks = fallbacks
 
     @property
     def model_id(self) -> str:
@@ -158,12 +190,51 @@ class AnthropicProvider:
                 else:
                     out.append({"role": "user", "content": [block]})
             elif m.role == "assistant":
+                if m.raw is not None:
+                    out.append({"role": "assistant", "content": m.raw})  # unchanged, thinking included
+                    continue
                 blocks: list[dict[str, Any]] = [{"type": "text", "text": m.content}] if m.content else []
                 blocks += [{"type": "tool_use", "id": c.id, "name": c.name, "input": c.arguments} for c in m.tool_calls]
                 out.append({"role": "assistant", "content": blocks or [{"type": "text", "text": ""}]})
             else:
                 out.append({"role": "user", "content": m.content})
         return out
+
+    def _request(
+        self,
+        system: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None,
+        force_tool: str | None,
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        if force_tool:
+            system += f"\n\nRespond only by calling the `{force_tool}` tool."
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "system": system,
+            "messages": self._messages(messages),
+            "max_tokens": max_tokens + self.THINKING_HEADROOM,
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": self._effort},
+        }
+        if self._fallbacks:
+            kwargs["betas"] = list(self.BETAS)
+            kwargs["fallbacks"] = "default"
+        if tools:
+            kwargs["tools"] = [
+                {"name": t.name, "description": t.description, "input_schema": t.parameters} for t in tools
+            ]
+        return kwargs
+
+    @staticmethod
+    def served_model(resp: Any) -> str:
+        """The model that produced the returned content (a fallback model, if one served it)."""
+        served = str(resp.model)
+        for it in getattr(resp.usage, "iterations", None) or []:
+            if getattr(it, "type", "") == "fallback_message":
+                served = str(it.model)
+        return served
 
     async def chat(
         self,
@@ -173,26 +244,17 @@ class AnthropicProvider:
         *,
         force_tool: str | None = None,
         max_tokens: int = 1024,
-        temperature: float = 0.0,
     ) -> ChatResult:
-        kwargs: dict[str, Any] = {
-            "model": self._model,
-            "system": system,
-            "messages": self._messages(messages),
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-        if tools:
-            kwargs["tools"] = [
-                {"name": t.name, "description": t.description, "input_schema": t.parameters} for t in tools
-            ]
-            if force_tool:
-                kwargs["tool_choice"] = {"type": "tool", "name": force_tool}
+        kwargs = self._request(system, messages, tools, force_tool, max_tokens)
         try:
-            resp = await self._client.messages.create(**kwargs)
+            if self._fallbacks:
+                resp = await self._client.beta.messages.create(**kwargs)
+            else:
+                resp = await self._client.messages.create(**kwargs)
         except Exception as exc:
             raise LLMError(f"{self.model_id}: {type(exc).__name__}: {exc}") from exc
         text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
         calls = [ToolCall(b.id, b.name, dict(b.input)) for b in resp.content if getattr(b, "type", "") == "tool_use"]
         usage = Usage(resp.usage.input_tokens or 0, resp.usage.output_tokens or 0)
-        return ChatResult(text, calls, usage, self.model_id, str(resp.stop_reason))
+        raw = [b.model_dump(mode="json", by_alias=True, exclude_none=True) for b in resp.content]
+        return ChatResult(text, calls, usage, f"anthropic:{self.served_model(resp)}", str(resp.stop_reason), raw=raw)

@@ -4,7 +4,7 @@
 
 Endpoints
   POST /v1/classify-registration   Workflow B: classify a new API registration
-  (Phase 5 adds /v1/ask: the discovery agent that answers developer questions via MCP)
+  POST /v1/ask                     the discovery agent: answers questions using MCP tools only
 
 When no LLM is configured the endpoints still answer, with `available: false`, so callers
 can fall back to human review instead of failing.
@@ -18,21 +18,31 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Request
+import httpx2
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from mcp import Client
+from mcp.client.streamable_http import streamable_http_client
 from pydantic import BaseModel, Field
 
 from ..config import Settings, get_settings
 from ..llm import LLMError, LLMProvider, LLMUnavailable, create_llm
+from ..mcp_server.catalog_client import ClientCredentialsTokens
 from ..security.jwt import JwtValidator
+from ..security.ratelimit import RateLimiter
 from ..service.auth import CallContext, CatalogAuth
 from .classify import ClassificationResult, classify
+from .discover import AgentAnswer, McpToolSource, ask
 
 log = logging.getLogger(__name__)
 
 
 class ClassifyIn(BaseModel):
     check: dict[str, Any] = Field(description="RegistrationCheck from the catalog's /v1/registrations/validate")
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=3, max_length=2000)
 
 
 def _ctx(request: Request) -> CallContext:
@@ -67,6 +77,16 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
         else None
     )
     app.state.auth = CatalogAuth(settings, validator)
+    tokens = None
+    if settings.auth_enabled and settings.agent_client_secret is not None:
+        token_url = (settings.oidc_jwks_url or settings.oidc_issuer + "/protocol/openid-connect/certs").replace(
+            "/certs", "/token"
+        )
+        tokens = ClientCredentialsTokens(
+            token_url, settings.agent_client_id, settings.agent_client_secret.get_secret_value()
+        )
+    # The agent is one MCP caller for many users, so users are rate-limited here.
+    limiter = RateLimiter(settings.rate_limit_per_minute / 6, max(2, settings.rate_limit_burst // 4))
 
     @app.middleware("http")
     async def request_id(request: Request, call_next: Any) -> Any:
@@ -95,6 +115,36 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
         except LLMError as exc:
             log.error("classification failed: %s", exc)
             return ClassificationResult(available=False, model=llm_.model_id, reason=f"LLM error: {exc}")
+
+    @app.post("/v1/ask", response_model=AgentAnswer)
+    async def ask_question(request: Request, ctx: Ctx, body: AskIn) -> AgentAnswer:
+        llm_: LLMProvider | None = request.app.state.llm
+        if llm_ is None:
+            raise HTTPException(503, f"no LLM configured: {request.app.state.llm_error}")
+        allowed, retry_after = limiter.allow(ctx.user)
+        if not allowed:
+            raise HTTPException(429, "rate limit exceeded", headers={"Retry-After": str(int(retry_after) + 1)})
+        headers = {"X-Request-ID": request.state.request_id}
+        if settings.auth_enabled:
+            if tokens is None:
+                raise HTTPException(503, "NORDLYS_AGENT_CLIENT_SECRET is not configured")
+            headers["Authorization"] = f"Bearer {await tokens()}"
+        async with (
+            httpx2.AsyncClient(headers=headers, timeout=30) as http,
+            Client(streamable_http_client(settings.agent_mcp_url, http_client=http)) as client,
+        ):
+            answer = await ask(llm_, McpToolSource(client), body.question, max_steps=settings.agent_max_steps)
+        log.info(
+            "ask user=%s model=%s stop=%s tools=%d tokens=%d/%d ms=%.0f",
+            ctx.user,
+            answer.model,
+            answer.stop,
+            len(answer.tool_calls),
+            answer.input_tokens,
+            answer.output_tokens,
+            answer.latency_ms,
+        )
+        return answer
 
     return app
 

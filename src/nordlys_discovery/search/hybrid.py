@@ -37,6 +37,10 @@ class SearchParams:
     bm25_k1: float = 1.2
     bm25_b: float = 0.75
     hnsw_ef_search: int = 100
+    # Multiplier for deprecated assets' fused scores (1.0 = off). Discovery should prefer an
+    # active API over its deprecated predecessor; not applied when the caller filters on
+    # deprecated=true. Chosen as a product rule; its effect is measured in eval/retrieval.py.
+    deprecated_penalty: float = 0.5
 
 
 def _filter_sql(f: SearchFilters, alias: str = "c") -> tuple[str, dict[str, Any]]:
@@ -172,7 +176,14 @@ def search(
     for cid, score in fused.items():
         c = chunks[cid]
         groups[(c.asset_type, c.asset_id, c.major_version)].append((score, c))
-    ordered = sorted(groups.items(), key=lambda kv: (-max(s for s, _ in kv[1]), kv[0][1], kv[0][2] or 0))
+
+    def asset_score(members: list[tuple[float, Chunk]]) -> float:
+        best = max(s for s, _ in members)
+        if members[0][1].deprecated and q.filters.deprecated is not True:
+            best *= params.deprecated_penalty
+        return best
+
+    ordered = sorted(groups.items(), key=lambda kv: (-asset_score(kv[1]), kv[0][1], kv[0][2] or 0))
 
     api_meta: dict[tuple[str, int | None], ApiSpec] = {}
     api_keys = [(a, v) for (t, a, v), _ in ordered[: q.limit] if t == "api"]
@@ -220,7 +231,7 @@ def search(
                 replacement=meta.replacement if meta else None,
                 pii_level=best.pii_level,
                 content_warnings=list(meta.content_warnings) if meta else dp_warnings.get(asset_id, []),
-                score=round(members[0][0], 6),
+                score=round(asset_score(members), 6),
                 best_match=matched(best),
                 other_matches=[matched(c) for _, c in members[1:4]],
             )
