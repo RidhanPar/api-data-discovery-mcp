@@ -123,12 +123,15 @@ call, plus the approval timeout on each Wait.
   assignment* for the requester on the target API's app registration, instead of the Keycloak
   Admin API. n8n's identity is a managed identity holding only
   `AppRoleAssignment.ReadWrite.All` scoped through an administrative unit. Locally,
-  `nordlys-n8n` holds Keycloak `manage-users`/`manage-realm`, which is broader than needed and
-  acceptable only for a demo.
+  `nordlys-n8n` holds Keycloak `manage-users` and `view-realm` only: it can assign the
+  realm roles defined in the realm-as-code, but cannot create roles or change realm
+  settings (both return 403). `manage-users` still lets it edit users; Keycloak has no
+  finer-grained built-in role for "assign roles only" without fine-grained admin
+  permissions, which would be the next step.
 - **Approval page:** links in e-mail are capabilities (an unguessable n8n resume token plus
   our HMAC). In production the approver would land on a page behind Entra ID SSO, so the
   approver's identity comes from a login rather than from the mailbox.
 - **Delivery guarantee:** the catalog → n8n event is best-effort with retries, and failures
-  are audited. A transactional outbox would make it at-least-once (see README, "What I'd do next").
+  are audited. A transactional outbox would make it at-least-once (see the README's limitations section).
 - **Licence:** n8n is "fair-code" (Sustainable Use License). Self-hosting for internal
   business processes is allowed, but a real insurer's legal team should review it.
