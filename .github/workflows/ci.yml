@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  test:
+    name: Lint, types, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-node@v4 # runs the n8n workflows' JavaScript in tests
+        with:
+          node-version: "22"
+      - name: Install
+        run: uv sync --all-extras
+      - name: Embedding model (checksum-pinned)
+        run: make model
+      - name: Lint, format, mypy
+        run: make lint
+      - name: Generated files are up to date
+        run: |
+          uv run python -m scripts.catalog_gen --check
+          uv run python deploy/n8n/build_workflows.py --check
+      - name: Tests (integration tests start pgvector via testcontainers)
+        run: uv run pytest -o addopts="" -q
+
+  retrieval-gate:
+    name: Retrieval eval gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      db:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: nordlys
+          POSTGRES_PASSWORD: nordlys
+          POSTGRES_DB: nordlys
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nordlys" --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync
+      - run: make model
+      - name: recall@3 and MRR on the CI subset must not regress
+        run: make eval-retrieval-ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retrieval-ci
+          path: eval/results/retrieval-ci.json
+
+  agent-eval:
+    name: Agent eval (CI subset, when LLM credentials are configured)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name != 'pull_request' # repository secrets are not available to fork PRs
+    services:
+      db:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: nordlys
+          POSTGRES_PASSWORD: nordlys
+          POSTGRES_DB: nordlys
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nordlys" --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      NORDLYS_LLM_PROVIDER: ${{ vars.NORDLYS_LLM_PROVIDER || 'none' }}
+      NORDLYS_AZURE_OPENAI_ENDPOINT: ${{ vars.NORDLYS_AZURE_OPENAI_ENDPOINT }}
+      NORDLYS_AZURE_OPENAI_CHAT_DEPLOYMENT: ${{ vars.NORDLYS_AZURE_OPENAI_CHAT_DEPLOYMENT || 'gpt-4.1-mini' }}
+      NORDLYS_AZURE_OPENAI_API_KEY: ${{ secrets.NORDLYS_AZURE_OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.NORDLYS_LLM_PROVIDER != 'none'
+      - uses: astral-sh/setup-uv@v6
+        if: env.NORDLYS_LLM_PROVIDER != 'none'
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Policy compliance must be 100%
+        if: env.NORDLYS_LLM_PROVIDER != 'none'
+        run: |
+          uv sync --all-extras
+          make model
+          uv run python -m eval.agent_eval --subset ci
+      - name: Skipped
+        if: env.NORDLYS_LLM_PROVIDER == 'none'
+        run: echo "Set the NORDLYS_LLM_PROVIDER repository variable and its credentials to run the agent eval."
+      - uses: actions/upload-artifact@v4
+        if: always() && env.NORDLYS_LLM_PROVIDER != 'none'
+        with:
+          name: agent-eval-ci
+          path: eval/results/agent-*
+
+  terraform:
+    name: Terraform (offline checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.5"
+      - run: terraform fmt -check -recursive
+      - run: terraform init -input=false -backend=false
+      - run: terraform validate
+      - name: Plan tests with mocked providers (no Azure credentials)
+        run: terraform test
+
+  image:
+    name: Container images build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t nordlys-discovery:ci .
+      - run: docker build -t nordlys-keycloak:ci deploy/keycloak
+      - run: docker build -t nordlys-n8n:ci deploy/n8n
