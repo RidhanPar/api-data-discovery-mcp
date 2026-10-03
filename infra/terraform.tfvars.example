@@ -1,0 +1,6 @@
+# cp terraform.tfvars.example terraform.tfvars  (git-ignored) and fill in.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+budget_emails   = ["you@example.com"]
+admin_cidrs     = ["203.0.113.10/32"] # your public IP: curl -s https://api.ipify.org
+# budget_amount      = 30
+# embedding_provider = "onnx-local"

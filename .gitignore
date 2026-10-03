@@ -56,3 +56,5 @@ service-account*.json
 .idea/
 .DS_Store
 Thumbs.db
+# provider lock file: generate on your platform with `terraform init` (see docs/azure.md)
+infra/.terraform.lock.hcl

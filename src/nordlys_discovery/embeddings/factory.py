@@ -15,11 +15,12 @@ def create_provider(settings: Settings) -> EmbeddingProvider:
         case "sentence-transformers":
             return SentenceTransformersEmbeddings(settings.sentence_transformers_model, dim=settings.embedding_dim)
         case "azure-openai":
-            if not settings.azure_openai_endpoint or not settings.azure_openai_api_key:
-                raise EmbeddingError("NORDLYS_AZURE_OPENAI_ENDPOINT and NORDLYS_AZURE_OPENAI_API_KEY are required")
+            if not settings.azure_openai_endpoint:
+                raise EmbeddingError("NORDLYS_AZURE_OPENAI_ENDPOINT is required")
+            key = settings.azure_openai_api_key
             return AzureOpenAIEmbeddings(
                 endpoint=settings.azure_openai_endpoint,
-                api_key=settings.azure_openai_api_key.get_secret_value(),
+                api_key=key.get_secret_value() if key else None,  # None -> managed identity
                 api_version=settings.azure_openai_api_version,
                 deployment=settings.azure_openai_embedding_deployment,
                 dim=settings.embedding_dim,

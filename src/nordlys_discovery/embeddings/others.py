@@ -46,17 +46,32 @@ class AzureOpenAIEmbeddings:
     """Azure OpenAI text-embedding-3-*, truncated to `dim` via the `dimensions` parameter.
 
     Keeping 384 dimensions means switching provider needs re-embedding, not a schema
-    migration. Install with `uv sync --extra azure`.
+    migration. Without an API key it authenticates with Entra ID (managed identity in
+    Azure, `az login` locally). Install with `uv sync --extra azure`.
     """
 
-    def __init__(self, *, endpoint: str, api_key: str, api_version: str, deployment: str, dim: int = 384) -> None:
+    def __init__(
+        self, *, endpoint: str, api_key: str | None, api_version: str, deployment: str, dim: int = 384
+    ) -> None:
         try:
             from openai import AzureOpenAI
         except ImportError as exc:  # pragma: no cover - depends on optional extra
             raise EmbeddingError("openai is not installed: uv sync --extra azure") from exc
-        self._client = AzureOpenAI(
-            azure_endpoint=endpoint, api_key=api_key, api_version=api_version, max_retries=3, timeout=20.0
-        )
+        if api_key:
+            self._client = AzureOpenAI(
+                azure_endpoint=endpoint, api_key=api_key, api_version=api_version, max_retries=3, timeout=20.0
+            )
+        else:
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+
+            token = get_bearer_token_provider(DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default")
+            self._client = AzureOpenAI(
+                azure_endpoint=endpoint,
+                azure_ad_token_provider=token,
+                api_version=api_version,
+                max_retries=3,
+                timeout=20.0,
+            )
         self._deployment = deployment
         self._dim = dim
 

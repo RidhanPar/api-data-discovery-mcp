@@ -226,7 +226,7 @@
       "name": "Discovery agent (service account)",
       "enabled": true,
       "publicClient": false,
-      "secret": "local-agent-secret-change-me",
+      "secret": "${AGENT_CLIENT_SECRET:local-agent-secret-change-me}",
       "serviceAccountsEnabled": true,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
@@ -246,7 +246,7 @@
       "name": "MCP server (calls the catalog)",
       "enabled": true,
       "publicClient": false,
-      "secret": "local-mcp-secret-change-me",
+      "secret": "${MCP_CLIENT_SECRET:local-mcp-secret-change-me}",
       "serviceAccountsEnabled": true,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
@@ -262,7 +262,7 @@
       "name": "n8n workflows",
       "enabled": true,
       "publicClient": false,
-      "secret": "local-n8n-secret-change-me",
+      "secret": "${N8N_CLIENT_SECRET:local-n8n-secret-change-me}",
       "serviceAccountsEnabled": true,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
@@ -314,7 +314,7 @@
       "credentials": [
         {
           "type": "password",
-          "value": "alice-local",
+          "value": "${DEMO_PASSWORD_ALICE:alice-local}",
           "temporary": false
         }
       ]
@@ -329,7 +329,7 @@
       "credentials": [
         {
           "type": "password",
-          "value": "bob-local",
+          "value": "${DEMO_PASSWORD_BOB:bob-local}",
           "temporary": false
         }
       ]
@@ -357,7 +357,7 @@
       "credentials": [
         {
           "type": "password",
-          "value": "dpo-local",
+          "value": "${DEMO_PASSWORD_DPO:dpo-local}",
           "temporary": false
         }
       ]

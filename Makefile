@@ -1,5 +1,5 @@
 comma := ,
-.PHONY: install model db migrate ingest serve mcp mcp-demo search catalog generate test test-unit lint check down up image workflows demo-access-flow eval-retrieval eval-retrieval-ci eval-agent
+.PHONY: install model db migrate ingest serve mcp mcp-demo search catalog generate test test-unit lint check down up image workflows demo-access-flow eval-retrieval eval-retrieval-ci eval-agent azure-test azure-cost azure-up azure-down
 
 install:
 	uv sync
@@ -73,3 +73,15 @@ eval-retrieval-ci: ## CI regression gate on the small subset
 
 eval-agent:       ## agent eval with an LLM judge (needs NORDLYS_LLM_PROVIDER + credentials)
 	uv run python -m eval.agent_eval --judge
+
+azure-test:       ## offline Terraform checks: fmt, validate, plan tests with mocked providers
+	cd infra && terraform fmt -check && terraform init -input=false -backend=false >/dev/null && terraform validate && terraform test
+
+azure-cost:       ## monthly estimate from live Azure list prices (Retail Prices API)
+	uv run python infra/cost_estimate.py
+
+azure-up:         ## deploy everything to Azure (needs az login + infra/terraform.tfvars)
+	scripts/azure_up.sh
+
+azure-down:       ## destroy everything in Azure
+	scripts/azure_down.sh
