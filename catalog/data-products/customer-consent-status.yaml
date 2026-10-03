@@ -1,0 +1,44 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: customer-consent-status
+name: Customer Consent Status
+version: 1.3.0
+status: active
+domain: customer
+description: >
+  Current consent state per customer and processing purpose, as recorded by the Customer Consent
+  API. Every marketing or profiling use of customer data must filter on this product. Refreshed
+  every 15 minutes so that withdrawals are honoured quickly.
+owner:
+  team: privacy-engineering
+  product_owner: Privacy Engineering Lead
+  contact: "#dp-consents"
+countries: [SE, "NO", FI, DK, EE, LV, LT]
+pii_classification: personal
+tags: [customer, consent, gdpr, privacy]
+freshness:
+  update_frequency: streaming
+  max_delay_hours: 0.25
+  sla: Withdrawals visible within 15 minutes.
+schema:
+  - {name: customer_id, type: string, description: Customer UUID., primary_key: true, pii: personal}
+  - {name: purpose, type: string, description: Processing purpose., primary_key: true}
+  - {name: granted, type: boolean, description: Current consent state.}
+  - {name: updated_at, type: timestamp, description: Last change.}
+  - {name: channel, type: string, description: Where it was captured.}
+quality_checks:
+  - {name: pk_unique, type: unique, rule: "(customer_id, purpose) unique"}
+  - {name: purpose_values, type: accepted_values, column: purpose, rule: "purpose in (marketing_email, marketing_sms, profiling, partner_sharing, health_data_processing, telematics)"}
+  - {name: fresh, type: freshness, rule: "max(updated_at) within 15 minutes of source"}
+access:
+  scope: dataproduct.consents.read
+  approval: self_service
+  allowed_purposes: [consent_enforcement, marketing_with_consent_check, privacy_reporting]
+  retention: Current state only; history kept in the Consent API audit log
+output_ports:
+  - {type: kafka_topic, location: customer.consents.v1}
+  - {type: databricks_table, location: nordlys_gold.customer.consent_status}
+sample_rows:
+  - {customer_id: 5d6e7f80-91a2-4b3c-8d4e-5f60718293a4, purpose: marketing_email, granted: false, updated_at: "2026-09-12T18:03:44Z", channel: app}
+related_apis: [customer-consent-api]
+last_reviewed: 2026-09-12

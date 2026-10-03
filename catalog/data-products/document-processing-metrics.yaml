@@ -1,0 +1,43 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: document-processing-metrics
+name: Document Processing Metrics
+version: 1.0.0
+status: active
+domain: documents
+description: >
+  Operational metrics for the document platform per hour and document kind: uploads, virus-scan
+  results, OCR success rate and processing latency. Contains no document content and no customer
+  identifiers. Feeds the document platform SLO dashboard.
+owner:
+  team: document-services
+  product_owner: Document Platform Lead
+  contact: "#dp-document-metrics"
+countries: [SE, "NO", FI, DK, EE, LV, LT]
+pii_classification: none
+tags: [documents, operations, slo, ocr]
+freshness:
+  update_frequency: hourly
+  max_delay_hours: 1
+  sla: Within 1 hour.
+schema:
+  - {name: hour, type: timestamp, description: Hour bucket (UTC)., primary_key: true}
+  - {name: document_kind, type: string, description: Document kind., primary_key: true}
+  - {name: uploads, type: integer, description: Uploaded documents.}
+  - {name: infected, type: integer, description: Documents rejected by virus scan.}
+  - {name: ocr_success_rate, type: decimal, description: Share of documents successfully OCR'd., nullable: true}
+  - {name: p95_processing_seconds, type: decimal, description: p95 upload-to-available latency.}
+quality_checks:
+  - {name: ocr_range, type: range, column: ocr_success_rate, rule: "between 0 and 1"}
+  - {name: infected_le_uploads, type: custom_sql, rule: "infected <= uploads"}
+access:
+  scope: dataproduct.document-metrics.read
+  approval: self_service
+  allowed_purposes: [operations_monitoring, analytics, capacity_planning]
+  retention: 2 years
+output_ports:
+  - {type: postgres_view, location: analytics.document_processing_metrics}
+sample_rows:
+  - {hour: "2026-09-30T09:00:00Z", document_kind: claim_attachment, uploads: 1288, infected: 0, ocr_success_rate: 0.962, p95_processing_seconds: 14.2}
+related_apis: [document-api]
+last_reviewed: 2026-03-19

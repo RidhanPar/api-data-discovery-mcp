@@ -1,0 +1,49 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: motor-telematics-trips
+name: Motor Telematics Trips
+version: 0.9.0
+status: active
+domain: policy
+description: >
+  Trip-level driving data (distance, harsh braking, speeding share, night driving) from the
+  "Drive Smart" app for customers who opted in to usage-based motor insurance in Sweden and Norway.
+  Location is generalised to H3 resolution-7 cells; raw GPS traces are NOT in this product.
+  Beta: schema may change before 1.0.
+owner:
+  team: motor-ubi
+  product_owner: Usage-Based Insurance PO
+  contact: "#dp-telematics"
+countries: [SE, "NO"]
+pii_classification: personal
+tags: [motor, telematics, usage-based-insurance, beta]
+freshness:
+  update_frequency: hourly
+  max_delay_hours: 4
+  sla: Trips available within 4 hours of trip end.
+schema:
+  - {name: trip_id, type: string, description: Trip UUID., primary_key: true}
+  - {name: policy_id, type: string, description: Motor policy UUID.}
+  - {name: customer_id, type: string, description: Driver/policyholder UUID., pii: personal}
+  - {name: trip_start, type: timestamp, description: Trip start (UTC)., pii: personal}
+  - {name: distance_km, type: decimal, description: Distance driven.}
+  - {name: harsh_brake_count, type: integer, description: Number of harsh braking events.}
+  - {name: speeding_share, type: decimal, description: Share of distance above the speed limit (0-1).}
+  - {name: night_share, type: decimal, description: Share of distance driven 23:00-05:00 (0-1).}
+  - {name: start_h3_r7, type: string, description: Start location as H3 resolution-7 cell., pii: personal}
+quality_checks:
+  - {name: shares_in_range, type: range, column: speeding_share, rule: "between 0 and 1"}
+  - {name: distance_positive, type: range, column: distance_km, rule: "> 0"}
+  - {name: consent_present, type: referential_integrity, column: customer_id, rule: "customer has active telematics consent in customer-consent-status"}
+access:
+  scope: dataproduct.telematics.read
+  approval: owner_approval
+  allowed_purposes: [usage_based_pricing, driver_feedback, claims_assessment_with_customer_consent]
+  prohibited_purposes: [marketing, sharing_with_third_parties, law_enforcement_without_court_order]
+  retention: 13 months
+output_ports:
+  - {type: databricks_table, location: nordlys_gold.motor.telematics_trips}
+sample_rows:
+  - {trip_id: c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e60, policy_id: a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5e, customer_id: f0e1d2c3-b4a5-4968-8776-655443322110, trip_start: "2026-09-28T07:42:10Z", distance_km: 23.4, harsh_brake_count: 1, speeding_share: 0.03, night_share: 0.0, start_h3_r7: 871f1d489ffffff}
+related_apis: [policy-api]
+last_reviewed: 2026-09-18

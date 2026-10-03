@@ -1,0 +1,53 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: customer-360-profile
+name: Customer 360 Profile
+version: 2.0.1
+status: active
+domain: customer
+description: >
+  One row per active customer combining master data, product holdings, tenure, claims count and
+  digital engagement. The go-to table for customer analytics, churn modelling and segmentation.
+  National identity numbers are deliberately excluded - join via customer_id only.
+  Marketing use requires a consent check against customer-consent-status.
+owner:
+  team: customer-data
+  product_owner: Customer Data Product Owner
+  contact: "#dp-customer-360"
+countries: [SE, "NO", FI, DK, EE, LV, LT]
+pii_classification: personal
+tags: [customer, "360", churn, segmentation, crm]
+freshness:
+  update_frequency: daily
+  max_delay_hours: 12
+  sla: Daily by 07:00 CET.
+schema:
+  - {name: customer_id, type: string, description: Customer UUID., primary_key: true, pii: personal}
+  - {name: country, type: string, description: Home market.}
+  - {name: customer_type, type: string, description: "private | business"}
+  - {name: birth_year, type: integer, description: Birth year (private customers)., pii: personal, nullable: true}
+  - {name: postal_code, type: string, description: Postal code., pii: personal}
+  - {name: email_domain, type: string, description: Domain part of email only (e.g. gmail.com)., pii: internal}
+  - {name: tenure_years, type: decimal, description: Years since first policy.}
+  - {name: active_policy_count, type: integer, description: Number of in-force policies.}
+  - {name: product_lines, type: array, description: Lines of business held.}
+  - {name: claims_last_36m, type: integer, description: Claims reported last 36 months.}
+  - {name: app_active_90d, type: boolean, description: Used the app in the last 90 days.}
+  - {name: segment, type: string, description: Marketing segment.}
+  - {name: churn_risk_score, type: decimal, description: Churn propensity 0-1 from the retention model., pii: personal}
+quality_checks:
+  - {name: customer_unique, type: unique, column: customer_id, rule: unique}
+  - {name: policy_count_positive, type: range, column: active_policy_count, rule: ">= 1"}
+  - {name: churn_score_range, type: range, column: churn_risk_score, rule: "between 0 and 1"}
+access:
+  scope: dataproduct.customer-360.read
+  approval: owner_approval
+  allowed_purposes: [customer_analytics, churn_modelling, service_improvement, marketing_with_consent_check]
+  prohibited_purposes: [credit_decisions, sharing_with_third_parties]
+  retention: Current snapshot plus 12 monthly history snapshots
+output_ports:
+  - {type: databricks_table, location: nordlys_gold.customer.customer_360}
+sample_rows:
+  - {customer_id: 5d6e7f80-91a2-4b3c-8d4e-5f60718293a4, country: DK, customer_type: private, birth_year: 1991, postal_code: "8000", email_domain: example.dk, tenure_years: 4.6, active_policy_count: 2, product_lines: "home;travel", claims_last_36m: 1, app_active_90d: true, segment: young_urban, churn_risk_score: 0.18}
+related_apis: [customer-api]
+last_reviewed: 2026-08-28

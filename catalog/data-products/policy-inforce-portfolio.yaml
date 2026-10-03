@@ -1,0 +1,53 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: policy-inforce-portfolio
+name: In-Force Policy Portfolio
+version: 3.2.0
+status: active
+domain: policy
+description: >
+  Daily snapshot of every policy that is in force, with product, coverages, premium and
+  policyholder reference. The single source of truth for portfolio size, exposure and
+  premium-in-force reporting. Joins to claims data products on policy_id.
+owner:
+  team: policy-core
+  product_owner: Policy Data Product Owner
+  contact: "#dp-policy-portfolio"
+countries: [SE, "NO", FI, DK, EE, LV, LT]
+pii_classification: personal
+tags: [policy, portfolio, exposure, premium]
+freshness:
+  update_frequency: daily
+  max_delay_hours: 6
+  sla: Available by 05:00 CET.
+schema:
+  - {name: snapshot_date, type: date, description: Snapshot date., primary_key: true}
+  - {name: policy_id, type: string, description: Policy UUID (Policy API v2 policyId)., primary_key: true}
+  - {name: policy_number, type: string, description: Policy number.}
+  - {name: country, type: string, description: Market.}
+  - {name: product_line, type: string, description: Line of business.}
+  - {name: package_code, type: string, description: "Package (BASIC, STANDARD, PLUS)."}
+  - {name: inception_date, type: date, description: Inception date.}
+  - {name: expiry_date, type: date, description: Expiry date.}
+  - {name: annual_premium_eur, type: decimal, description: Annualised premium in EUR.}
+  - {name: sales_channel, type: string, description: "web | app | call_centre | broker | partner"}
+  - {name: broker_id, type: string, description: Broker of record., nullable: true}
+  - {name: customer_id, type: string, description: Policyholder UUID., pii: personal}
+  - {name: risk_postal_code, type: string, description: Postal code of insured object., pii: personal, nullable: true}
+quality_checks:
+  - {name: pk_unique, type: unique, rule: "(snapshot_date, policy_id) unique"}
+  - {name: premium_positive, type: range, column: annual_premium_eur, rule: "> 0"}
+  - {name: dates_consistent, type: custom_sql, rule: "expiry_date > inception_date"}
+  - {name: on_time, type: freshness, rule: "snapshot for D-1 present by 05:00 CET"}
+access:
+  scope: dataproduct.policy-portfolio.read
+  approval: owner_approval
+  allowed_purposes: [portfolio_reporting, actuarial_analysis, pricing_model_development, finance_reporting]
+  prohibited_purposes: [marketing_without_consent_check]
+  retention: 36 months of snapshots
+output_ports:
+  - {type: databricks_table, location: nordlys_gold.policy.inforce_portfolio}
+sample_rows:
+  - {snapshot_date: "2026-09-30", policy_id: 8e7d6c5b-4a39-4281-9f0e-1d2c3b4a5968, policy_number: DK-HOM-0098812, country: DK, product_line: home, package_code: PLUS, inception_date: "2026-02-01", expiry_date: "2027-02-01", annual_premium_eur: 412.80, sales_channel: web, broker_id: null, customer_id: 5d6e7f80-91a2-4b3c-8d4e-5f60718293a4, risk_postal_code: "8000"}
+related_apis: [policy-api]
+last_reviewed: 2026-09-10

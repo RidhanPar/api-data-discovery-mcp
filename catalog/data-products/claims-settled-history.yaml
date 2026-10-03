@@ -1,0 +1,47 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: claims-settled-history
+name: Settled Claims History
+version: 1.4.0
+status: active
+domain: claims
+description: All closed claims since 2015 with final paid amounts. used for pricing models + loss ratio.
+owner:
+  team: claims-platform
+  product_owner: Claims Data Product Owner
+  contact: "#dp-claims-open-cases"
+countries: [SE, "NO", FI, DK]
+pii_classification: personal
+tags: [claims, history, pricing, loss-ratio]
+freshness:
+  update_frequency: weekly
+  max_delay_hours: 72
+  sla: Refreshed every Monday.
+schema:
+  - {name: claim_id, type: string, description: claim uuid, primary_key: true}
+  - {name: policy_id, type: string, description: policy uuid}
+  - {name: country, type: string, description: market}
+  - {name: product_line, type: string, description: lob}
+  - {name: loss_cause, type: string, description: cause code}
+  - {name: loss_date, type: date, description: loss date}
+  - {name: closed_date, type: date, description: closed date}
+  - {name: paid_amount_eur, type: decimal, description: total paid EUR}
+  - {name: recovered_amount_eur, type: decimal, description: subrogation/recoveries EUR}
+  - {name: customer_birth_year, type: integer, description: birth year of policyholder, pii: personal}
+  - {name: postal_code, type: string, description: postal code of risk address, pii: personal}
+quality_checks:
+  - {name: claim_unique, type: unique, column: claim_id, rule: unique}
+  - {name: closed_after_loss, type: custom_sql, rule: "closed_date >= loss_date"}
+  - {name: paid_not_null, type: not_null, column: paid_amount_eur, rule: not null}
+access:
+  scope: dataproduct.claims-history.read
+  approval: owner_approval
+  allowed_purposes: [pricing_model_development, actuarial_analysis, reinsurance_reporting]
+  prohibited_purposes: [marketing]
+  retention: 10 years (actuarial requirement)
+output_ports:
+  - {type: databricks_table, location: nordlys_gold.claims.settled_history}
+sample_rows:
+  - {claim_id: 2d4e6f80-1a3b-4c5d-8e9f-0a1b2c3d4e5f, policy_id: 9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d, country: SE, product_line: motor, loss_cause: collision, loss_date: "2024-02-11", closed_date: "2024-04-02", paid_amount_eur: 3120.50, recovered_amount_eur: 0.0, customer_birth_year: 1987, postal_code: "41301"}
+related_apis: [claims-api]
+last_reviewed: 2025-11-03

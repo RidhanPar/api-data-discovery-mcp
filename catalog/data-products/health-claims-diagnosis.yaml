@@ -1,0 +1,48 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: health-claims-diagnosis
+name: Accident & Health Claims - Diagnosis Detail
+version: 1.0.3
+status: active
+domain: claims
+description: >
+  Personal accident and health insurance claims enriched with ICD-10 diagnosis codes and treatment
+  categories from medical certificates. Contains special-category health data (GDPR Article 9).
+  Access requires approval from both the data owner and the Data Protection Officer, and is
+  granted only for medical claims assessment and actuarial work on pseudonymised extracts.
+owner:
+  team: health-claims
+  product_owner: Health Claims Data Steward
+  contact: "#dp-health-claims (restricted)"
+countries: [SE, "NO", FI, DK]
+pii_classification: sensitive
+tags: [claims, health, accident, icd-10, gdpr-art-9]
+freshness:
+  update_frequency: daily
+  max_delay_hours: 24
+  sla: Daily by 08:00 CET.
+schema:
+  - {name: claim_id, type: string, description: Claim UUID., primary_key: true}
+  - {name: country, type: string, description: Market.}
+  - {name: customer_id, type: string, description: Policyholder UUID., pii: personal}
+  - {name: injured_person_birth_year, type: integer, description: Birth year of injured person., pii: personal}
+  - {name: icd10_code, type: string, description: Primary ICD-10 diagnosis code from the medical certificate., pii: sensitive}
+  - {name: treatment_category, type: string, description: "Treatment category (physiotherapy, surgery, dental, psychology...).", pii: sensitive}
+  - {name: disability_degree_pct, type: decimal, description: Assessed degree of permanent medical disability., pii: sensitive, nullable: true}
+  - {name: paid_amount_eur, type: decimal, description: Paid to date in EUR.}
+quality_checks:
+  - {name: icd10_format, type: custom_sql, column: icd10_code, rule: "icd10_code ~ '^[A-Z][0-9]{2}(\\.[0-9A-Z]{1,4})?$'"}
+  - {name: disability_range, type: range, column: disability_degree_pct, rule: "between 0 and 100"}
+  - {name: claim_exists, type: referential_integrity, column: claim_id, rule: "exists in claims-settled-history or claims-open-cases-daily"}
+access:
+  scope: dataproduct.health-claims.read
+  approval: owner_and_dpo_approval
+  allowed_purposes: [medical_claims_assessment, actuarial_analysis_pseudonymised]
+  prohibited_purposes: [marketing, pricing_individual_customers, fraud_profiling_without_case, model_training_identifiable]
+  retention: Claim lifetime + 10 years, then deleted
+output_ports:
+  - {type: databricks_table, location: nordlys_restricted.health.claims_diagnosis}
+sample_rows:
+  - {claim_id: 7c1d9e2f-4a6b-4c8d-9e0f-1a2b3c4d5e6f, country: FI, customer_id: 3e4f5a6b-7c8d-4e9f-a0b1-c2d3e4f5a6b7, injured_person_birth_year: 1979, icd10_code: S82.6, treatment_category: surgery, disability_degree_pct: 5.0, paid_amount_eur: 8750.00}
+related_apis: [claims-api, document-api]
+last_reviewed: 2026-06-30

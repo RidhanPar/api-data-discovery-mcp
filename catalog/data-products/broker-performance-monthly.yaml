@@ -1,0 +1,46 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: broker-performance-monthly
+name: Broker Performance - Monthly
+version: 1.0.0
+status: active
+domain: partner
+description: >
+  Monthly KPIs per broker firm: new business premium, renewal retention, loss ratio of the broker's
+  book and number of active policies. Broker firms are businesses, so firm-level data is internal
+  rather than personal. Used by partner managers for broker reviews and incentive planning.
+owner:
+  team: partner-integrations
+  product_owner: Partner Management Analytics
+  contact: "#dp-broker-performance"
+countries: [SE, "NO", FI, DK]
+pii_classification: internal
+tags: [partner, broker, kpi, loss-ratio]
+freshness:
+  update_frequency: monthly
+  max_delay_hours: 240
+  sla: By the 10th of the following month.
+schema:
+  - {name: month, type: date, description: First day of month., primary_key: true}
+  - {name: broker_firm_id, type: string, description: Broker firm id., primary_key: true}
+  - {name: broker_firm_name, type: string, description: Registered company name.}
+  - {name: country, type: string, description: Market.}
+  - {name: new_business_premium_eur, type: decimal, description: New business GWP EUR.}
+  - {name: retention_rate, type: decimal, description: Renewal retention 0-1.}
+  - {name: loss_ratio_12m, type: decimal, description: Rolling 12-month loss ratio of the book.}
+  - {name: active_policies, type: integer, description: Active policies placed by the firm.}
+quality_checks:
+  - {name: retention_range, type: range, column: retention_rate, rule: "between 0 and 1"}
+  - {name: pk_unique, type: unique, rule: "(month, broker_firm_id) unique"}
+access:
+  scope: dataproduct.broker-performance.read
+  approval: owner_approval
+  allowed_purposes: [partner_management, incentive_planning, management_reporting]
+  prohibited_purposes: [sharing_with_other_brokers]
+  retention: 7 years
+output_ports:
+  - {type: databricks_table, location: nordlys_gold.partner.broker_performance_monthly}
+sample_rows:
+  - {month: "2026-08-01", broker_firm_id: BRK-NO-0042, broker_firm_name: Fjordmegling AS, country: "NO", new_business_premium_eur: 182300.00, retention_rate: 0.88, loss_ratio_12m: 0.61, active_policies: 2214}
+related_apis: [broker-portfolio-api]
+last_reviewed: 2026-04-15

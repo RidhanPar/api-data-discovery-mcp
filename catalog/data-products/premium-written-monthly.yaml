@@ -1,0 +1,45 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: premium-written-monthly
+name: Gross Written Premium - Monthly
+version: 1.6.0
+status: active
+domain: policy
+description: >
+  Gross written premium (GWP) per month, market, product line and sales channel, reconciled with
+  the general ledger. Aggregated - no customer or policy identifiers. The official figure for
+  management reporting; numbers for a month are frozen after the 5th working day.
+owner:
+  team: finance-systems
+  product_owner: Finance Reporting Lead
+  contact: "#dp-gwp"
+countries: [SE, "NO", FI, DK, EE, LV, LT]
+pii_classification: internal
+tags: [finance, premium, gwp, management-reporting, aggregated]
+freshness:
+  update_frequency: monthly
+  max_delay_hours: 168
+  sla: Final figures by the 5th working day of the following month.
+schema:
+  - {name: month, type: date, description: First day of the month., primary_key: true}
+  - {name: country, type: string, description: Market., primary_key: true}
+  - {name: product_line, type: string, description: Line of business., primary_key: true}
+  - {name: sales_channel, type: string, description: Sales channel., primary_key: true}
+  - {name: gwp_eur, type: decimal, description: Gross written premium EUR.}
+  - {name: policy_count, type: integer, description: Number of policies written.}
+  - {name: is_final, type: boolean, description: True once the month is closed in the ledger.}
+quality_checks:
+  - {name: ledger_reconciled, type: custom_sql, rule: "abs(sum(gwp_eur) - ledger_gwp) / ledger_gwp < 0.001 per month and country"}
+  - {name: gwp_not_null, type: not_null, column: gwp_eur, rule: not null}
+access:
+  scope: dataproduct.gwp.read
+  approval: self_service
+  allowed_purposes: [management_reporting, finance_reporting, analytics, budgeting]
+  retention: Indefinite
+output_ports:
+  - {type: databricks_table, location: nordlys_gold.finance.gwp_monthly}
+  - {type: postgres_view, location: analytics.gwp_monthly}
+sample_rows:
+  - {month: "2026-08-01", country: SE, product_line: motor, sales_channel: web, gwp_eur: 4123000.00, policy_count: 10988, is_final: true}
+related_apis: []
+last_reviewed: 2026-05-20

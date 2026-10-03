@@ -1,0 +1,46 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: quote-conversion-funnel
+name: Quote Conversion Funnel
+version: 1.1.0
+status: active
+domain: quotes
+description: >
+  Daily quote-to-bind funnel per market, product line, package and channel: quotes created,
+  quotes priced, quotes declined, quotes bound and median time to bind. Aggregated; no customer
+  identifiers. Built from Quote API v2 events (v1 quotes are mapped where possible).
+owner:
+  team: pricing-and-quotes
+  product_owner: Digital Sales Analytics
+  contact: "#dp-quote-funnel"
+countries: [SE, "NO", FI, DK, EE, LV, LT]
+pii_classification: internal
+tags: [quotes, conversion, funnel, pricing, aggregated]
+freshness:
+  update_frequency: daily
+  max_delay_hours: 10
+  sla: Daily by 08:00 CET.
+schema:
+  - {name: date, type: date, description: Quote creation date., primary_key: true}
+  - {name: country, type: string, description: Market., primary_key: true}
+  - {name: product_line, type: string, description: Line of business., primary_key: true}
+  - {name: channel, type: string, description: Sales channel., primary_key: true}
+  - {name: quotes_created, type: integer, description: Quotes created.}
+  - {name: quotes_declined, type: integer, description: Quotes declined by underwriting rules.}
+  - {name: quotes_bound, type: integer, description: Quotes bound into policies within 30 days.}
+  - {name: conversion_rate, type: decimal, description: quotes_bound / quotes_created.}
+  - {name: median_hours_to_bind, type: decimal, description: Median hours from quote to bind., nullable: true}
+quality_checks:
+  - {name: bound_le_created, type: custom_sql, rule: "quotes_bound <= quotes_created"}
+  - {name: conversion_range, type: range, column: conversion_rate, rule: "between 0 and 1"}
+access:
+  scope: dataproduct.quote-funnel.read
+  approval: self_service
+  allowed_purposes: [analytics, pricing_model_development, product_development, management_reporting]
+  retention: 5 years
+output_ports:
+  - {type: databricks_table, location: nordlys_gold.quotes.conversion_funnel}
+sample_rows:
+  - {date: "2026-09-29", country: FI, product_line: motor, channel: web, quotes_created: 1840, quotes_declined: 41, quotes_bound: 302, conversion_rate: 0.164, median_hours_to_bind: 3.5}
+related_apis: [quote-api]
+last_reviewed: 2026-07-01

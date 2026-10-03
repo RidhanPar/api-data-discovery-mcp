@@ -1,0 +1,55 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: claims-open-cases-daily
+name: Open Claims - Daily Snapshot
+version: 2.1.0
+status: active
+domain: claims
+description: >
+  One row per claim that is open (not settled, rejected or closed) at the end of each business day,
+  across all markets. The standard source for claims backlog reporting, handler workload planning
+  and reserving analytics. For operational, real-time lookups use the Claims Search API instead.
+owner:
+  team: claims-platform
+  product_owner: Claims Data Product Owner
+  contact: "#dp-claims-open-cases"
+countries: [SE, "NO", FI, DK, EE, LV, LT]
+pii_classification: personal
+tags: [claims, backlog, reserving, daily-snapshot]
+freshness:
+  update_frequency: daily
+  max_delay_hours: 8
+  sla: Snapshot for day D available by 06:00 CET on D+1.
+schema:
+  - {name: snapshot_date, type: date, description: Business day of the snapshot., primary_key: true}
+  - {name: claim_id, type: string, description: Claim UUID (joins to Claims API v2 claimId)., primary_key: true}
+  - {name: claim_number, type: string, description: Customer-facing claim reference.}
+  - {name: country, type: string, description: Market ISO code.}
+  - {name: product_line, type: string, description: Line of business.}
+  - {name: status, type: string, description: Claims API v2 status at end of day.}
+  - {name: loss_date, type: date, description: Date of loss.}
+  - {name: reported_date, type: date, description: Date first reported.}
+  - {name: days_open, type: integer, description: Calendar days since reported.}
+  - {name: reserve_amount_eur, type: decimal, description: Outstanding reserve converted to EUR at month-start rate.}
+  - {name: handler_team, type: string, description: Handling unit.}
+  - {name: customer_id, type: string, description: Policyholder UUID., pii: personal}
+  - {name: postal_code, type: string, description: Postal code of the loss location., pii: personal, nullable: true}
+quality_checks:
+  - {name: pk_unique, type: unique, rule: "(snapshot_date, claim_id) is unique"}
+  - {name: status_is_open, type: accepted_values, column: status, rule: "status in (registered, open, in_assessment, awaiting_documents, reopened)"}
+  - {name: reserve_non_negative, type: range, column: reserve_amount_eur, rule: ">= 0"}
+  - {name: daily_volume, type: row_count, rule: "between 0.8x and 1.2x of the 7-day average", severity: warn}
+  - {name: on_time, type: freshness, rule: "max(snapshot_date) = current_date - 1 by 06:00 CET"}
+access:
+  scope: dataproduct.claims-open-cases.read
+  approval: owner_approval
+  allowed_purposes: [claims_operations_reporting, reserving, workforce_planning]
+  prohibited_purposes: [marketing, individual_pricing]
+  retention: 24 months of snapshots
+output_ports:
+  - {type: databricks_table, location: nordlys_gold.claims.open_cases_daily}
+  - {type: postgres_view, location: analytics.claims_open_cases_daily}
+sample_rows:
+  - {snapshot_date: "2026-09-30", claim_id: 6f1c2a9e-1b7d-4c55-9a51-0d2f6e3b8a10, claim_number: NO-CLM-2026-004211, country: "NO", product_line: home, status: in_assessment, loss_date: "2026-09-21", reported_date: "2026-09-22", days_open: 8, reserve_amount_eur: 4200.00, handler_team: no-property-oslo, customer_id: 0b9e5d1a-3c2f-4e8b-a7d6-5f4c3b2a1e0d, postal_code: "0450"}
+related_apis: [claims-search-api, claims-api]
+last_reviewed: 2026-08-14

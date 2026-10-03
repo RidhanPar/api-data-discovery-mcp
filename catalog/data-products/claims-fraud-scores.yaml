@@ -1,0 +1,50 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: claims-fraud-scores
+name: Claims Fraud Scores
+version: 3.0.0
+status: active
+domain: fraud
+description: >
+  Historical fraud risk scores and reason codes for every scored claim, with the investigation
+  outcome where one exists. Used by the SIU to monitor model performance and by fraud analytics
+  to retrain models. Highly restricted: knowledge of which claims were flagged could tip off
+  fraudsters and could unfairly affect customers.
+owner:
+  team: fraud-analytics
+  product_owner: Fraud Analytics Lead
+  contact: "#dp-fraud-scores (restricted)"
+countries: [SE, "NO", FI, DK, EE, LV, LT]
+pii_classification: sensitive
+tags: [fraud, siu, model-monitoring, restricted]
+freshness:
+  update_frequency: hourly
+  max_delay_hours: 2
+  sla: Hourly micro-batch.
+schema:
+  - {name: claim_id, type: string, description: Claim UUID., primary_key: true}
+  - {name: scored_at, type: timestamp, description: Scoring time., primary_key: true}
+  - {name: country, type: string, description: Market.}
+  - {name: customer_id, type: string, description: Policyholder UUID., pii: personal}
+  - {name: score, type: decimal, description: Fraud risk score 0-1., pii: sensitive}
+  - {name: band, type: string, description: "low | medium | high", pii: sensitive}
+  - {name: reason_codes, type: array, description: Explainable reason codes., pii: sensitive}
+  - {name: model_version, type: string, description: Model version.}
+  - {name: investigation_outcome, type: string, description: "SIU outcome if investigated (confirmed, no_fraud, inconclusive).", pii: sensitive, nullable: true}
+quality_checks:
+  - {name: score_range, type: range, column: score, rule: "between 0 and 1"}
+  - {name: band_values, type: accepted_values, column: band, rule: "band in (low, medium, high)"}
+  - {name: model_version_present, type: not_null, column: model_version, rule: not null}
+access:
+  scope: dataproduct.fraud-scores.read
+  approval: owner_and_dpo_approval
+  allowed_purposes: [fraud_investigation, fraud_model_monitoring, fraud_model_training]
+  prohibited_purposes: [marketing, pricing, customer_communication, automated_claim_rejection]
+  retention: 5 years after claim closure
+output_ports:
+  - {type: databricks_table, location: nordlys_restricted.fraud.claims_scores}
+  - {type: kafka_topic, location: fraud.claims-scores.v3}
+sample_rows:
+  - {claim_id: 4b5c6d7e-8f90-4a1b-b2c3-d4e5f6a7b8c9, scored_at: "2026-09-29T10:14:02Z", country: SE, customer_id: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d, score: 0.87, band: high, reason_codes: "EARLY_CLAIM_AFTER_INCEPTION;SHARED_BANK_ACCOUNT", model_version: fraud-gbm-3.2.1, investigation_outcome: null}
+related_apis: [fraud-signals-api, fraud-case-referral-api]
+last_reviewed: 2026-07-22

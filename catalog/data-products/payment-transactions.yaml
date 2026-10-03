@@ -1,0 +1,50 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: payment-transactions
+name: Payment Transactions
+version: 2.2.0
+status: active
+domain: payments
+description: >
+  Every incoming premium payment and outgoing claim payout, with scheme (Autogiro, AvtaleGiro,
+  Betalingsservice, SEPA, Swish, Vipps, MobilePay, card), status and matching to invoices or
+  claims. Bank account numbers are masked to the last four digits.
+owner:
+  team: billing
+  product_owner: Payments Data Product Owner
+  contact: "#dp-payments"
+countries: [SE, "NO", FI, DK, EE, LV, LT]
+pii_classification: personal
+tags: [payments, invoices, payouts, reconciliation]
+freshness:
+  update_frequency: hourly
+  max_delay_hours: 2
+  sla: Hourly; bank files processed within 2 hours of receipt.
+schema:
+  - {name: transaction_id, type: string, description: Transaction UUID., primary_key: true}
+  - {name: direction, type: string, description: "incoming (premium) | outgoing (payout)"}
+  - {name: scheme, type: string, description: Payment scheme.}
+  - {name: amount, type: decimal, description: Amount in original currency.}
+  - {name: currency, type: string, description: ISO 4217.}
+  - {name: booked_at, type: timestamp, description: Booking time.}
+  - {name: status, type: string, description: "booked | returned | failed"}
+  - {name: invoice_id, type: string, description: Matched invoice (incoming)., nullable: true}
+  - {name: claim_id, type: string, description: Matched claim (outgoing)., nullable: true}
+  - {name: customer_id, type: string, description: Customer UUID., pii: personal}
+  - {name: masked_account, type: string, description: "Masked account, e.g. ****1234.", pii: personal}
+quality_checks:
+  - {name: tx_unique, type: unique, column: transaction_id, rule: unique}
+  - {name: matched, type: custom_sql, rule: "invoice_id is not null or claim_id is not null", severity: warn}
+  - {name: currency_values, type: accepted_values, column: currency, rule: "in (SEK, NOK, DKK, EUR)"}
+access:
+  scope: dataproduct.payments.read
+  approval: owner_approval
+  allowed_purposes: [finance_reporting, payment_reconciliation, collections, fraud_investigation]
+  prohibited_purposes: [marketing, credit_scoring]
+  retention: 10 years (bookkeeping law)
+output_ports:
+  - {type: databricks_table, location: nordlys_gold.payments.transactions}
+sample_rows:
+  - {transaction_id: 0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e, direction: incoming, scheme: avtalegiro_no, amount: 489.00, currency: NOK, booked_at: "2026-09-20T04:12:00Z", status: booked, invoice_id: 11223344-5566-4778-8990-aabbccddeeff, claim_id: null, customer_id: 0b9e5d1a-3c2f-4e8b-a7d6-5f4c3b2a1e0d, masked_account: "****8812"}
+related_apis: [premium-invoice-api, claims-payout-api, payment-methods-api]
+last_reviewed: 2026-06-05

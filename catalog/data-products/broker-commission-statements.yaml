@@ -1,0 +1,40 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: broker-commission-statements
+name: broker commission statements
+version: 1.0.0
+status: active
+domain: partner
+description: commission lines per broker per month. includes individual (sole trader) brokers so treat as personal.
+owner:
+  team: finance-systems
+  product_owner: Finance Reporting Lead
+  contact: "#finance-systems"
+countries: [SE, "NO", FI, DK]
+pii_classification: personal
+tags: [partner, broker, commission, finance]
+freshness:
+  update_frequency: monthly
+  max_delay_hours: 240
+  sla: monthly after commission run
+schema:
+  - {name: statement_id, type: string, description: statement id, primary_key: true}
+  - {name: line_no, type: integer, description: line number, primary_key: true}
+  - {name: broker_id, type: string, description: broker id (firm or sole trader), pii: personal}
+  - {name: period, type: string, description: YYYY-MM}
+  - {name: policy_number, type: string, description: policy no}
+  - {name: commission_type, type: string, description: new_business/renewal/clawback}
+  - {name: commission_eur, type: decimal, description: amount EUR (negative for clawbacks)}
+quality_checks:
+  - {name: type_values, type: accepted_values, column: commission_type, rule: "in (new_business, renewal, clawback)"}
+access:
+  scope: dataproduct.broker-commission.read
+  approval: owner_approval
+  allowed_purposes: [finance_reporting, commission_reconciliation]
+  retention: 10 years (bookkeeping law)
+output_ports:
+  - {type: databricks_table, location: nordlys_gold.finance.broker_commission_lines}
+sample_rows:
+  - {statement_id: CS-2026-08-0042, line_no: 1, broker_id: BRK-NO-0042, period: 2026-08, policy_number: NO-MOT-0044120, commission_type: new_business, commission_eur: 96.40}
+related_apis: [broker-commission-api]
+last_reviewed: 2025-02-01

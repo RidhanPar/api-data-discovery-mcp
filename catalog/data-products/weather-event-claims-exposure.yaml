@@ -1,0 +1,47 @@
+apiVersion: nordlys.io/data-product/v1
+kind: DataProduct
+id: weather-event-claims-exposure
+name: Weather Events x Claims Exposure
+version: 1.2.0
+status: active
+domain: claims
+description: >
+  Aggregated claim counts and amounts per municipality and day, joined with open weather data
+  (storm, heavy rain, frost) from the Nordic meteorological institutes. No customer-level data:
+  the smallest cell is a municipality-day with at least 5 claims (smaller cells are suppressed).
+  Used for catastrophe (CAT) event monitoring and reinsurance reporting.
+owner:
+  team: risk-analytics
+  product_owner: CAT Modelling Lead
+  contact: "#dp-weather-exposure"
+countries: [SE, "NO", FI, DK]
+pii_classification: none
+tags: [claims, weather, catastrophe, reinsurance, aggregated, open-data]
+freshness:
+  update_frequency: hourly
+  max_delay_hours: 3
+  sla: Within 3 hours of the weather observation.
+schema:
+  - {name: event_date, type: date, description: Observation date., primary_key: true}
+  - {name: municipality_code, type: string, description: National municipality code (kommunkod / kommunenummer / kuntanumero / kommunekode)., primary_key: true}
+  - {name: country, type: string, description: Market.}
+  - {name: max_wind_ms, type: decimal, description: Max wind gust m/s.}
+  - {name: precipitation_mm, type: decimal, description: 24h precipitation in mm.}
+  - {name: weather_event_flag, type: string, description: "storm | heavy_rain | frost | none", nullable: true}
+  - {name: claim_count, type: integer, description: Claims reported for losses on that day. Cells < 5 suppressed.}
+  - {name: incurred_eur, type: decimal, description: Sum of initial reserves in EUR.}
+quality_checks:
+  - {name: small_cell_suppression, type: range, column: claim_count, rule: ">= 5"}
+  - {name: pk_unique, type: unique, rule: "(event_date, municipality_code) unique"}
+access:
+  scope: dataproduct.weather-exposure.read
+  approval: self_service
+  allowed_purposes: [catastrophe_monitoring, reinsurance_reporting, analytics, product_development]
+  retention: Indefinite
+output_ports:
+  - {type: databricks_table, location: nordlys_gold.risk.weather_claims_exposure}
+  - {type: parquet_adls, location: "abfss://gold@nordlysdatalake.dfs.core.windows.net/risk/weather_claims_exposure/"}
+sample_rows:
+  - {event_date: "2026-08-07", municipality_code: "0301", country: "NO", max_wind_ms: 31.2, precipitation_mm: 58.0, weather_event_flag: storm, claim_count: 143, incurred_eur: 612000.00}
+related_apis: []
+last_reviewed: 2026-09-01
