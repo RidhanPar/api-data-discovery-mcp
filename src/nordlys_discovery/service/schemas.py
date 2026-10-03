@@ -37,6 +37,7 @@ class DocQuality(BaseModel):
     description_coverage: float
     has_api_description: bool
     metadata_provenance: dict[str, str]
+    content_warnings: list[str] = []
 
 
 class ApiDetails(ApiSummary):
@@ -91,9 +92,17 @@ class DataProductSummary(BaseModel):
 
 class DataProductDetails(DataProductSummary):
     description: str
+    content_warnings: list[str] = []
     contract: dict[str, Any]
     sample_rows: list[dict[str, Any]] | None
     sample_rows_withheld: bool
+    sample_policy_reason: str | None = None
+
+
+class SampleRows(BaseModel):
+    product_id: str
+    rows: list[dict[str, Any]]
+    policy_reason: str
 
 
 class Problem(BaseModel):

@@ -31,6 +31,7 @@ from ..catalog.metadata import ApiMetadata, extract_metadata
 from ..catalog.models import DataProduct
 from ..db.models import ApiSpec, Chunk, DataProductRow
 from ..embeddings import EmbeddingProvider
+from ..security.injection import SCANNER_VERSION, scan_document
 from .chunking import CHUNKER_VERSION, ChunkDraft, api_chunks, data_product_chunks, sha256_json
 
 log = logging.getLogger(__name__)
@@ -101,7 +102,7 @@ def _ingest_api(session: Session, path: Path, rel: str, report: IngestReport, se
         raise CatalogError(path, f"duplicate api {meta.api_id} v{meta.major_version}")
     seen.add(ident)
 
-    content_hash = sha256_json([CHUNKER_VERSION, spec.document])
+    content_hash = sha256_json([CHUNKER_VERSION, SCANNER_VERSION, spec.document])
     row = session.scalar(select(ApiSpec).filter_by(api_id=meta.api_id, major_version=meta.major_version))
     if row is not None and row.content_hash == content_hash and row.source_path == rel:
         report.apis["unchanged"] += 1
@@ -121,6 +122,7 @@ def _ingest_api(session: Session, path: Path, rel: str, report: IngestReport, se
         sunset=meta.sunset,
         replacement=meta.replacement,
         metadata_provenance=meta.provenance,
+        content_warnings=scan_document(spec.document),
         source_path=rel,
         content_hash=content_hash,
         raw=spec.document,
@@ -158,7 +160,7 @@ def _ingest_product(session: Session, path: Path, rel: str, report: IngestReport
         raise CatalogError(path, f"duplicate data product {dp.id}")
     seen.add(dp.id)
     raw = dp.model_dump(mode="json", by_alias=True)
-    content_hash = sha256_json([CHUNKER_VERSION, raw])
+    content_hash = sha256_json([CHUNKER_VERSION, SCANNER_VERSION, raw])
     row = session.scalar(select(DataProductRow).filter_by(product_id=dp.id))
     if row is not None and row.content_hash == content_hash and row.source_path == rel:
         report.data_products["unchanged"] += 1
@@ -173,6 +175,7 @@ def _ingest_product(session: Session, path: Path, rel: str, report: IngestReport
         countries=list(dp.countries),
         pii_classification=dp.pii_classification.value,
         description=dp.description,
+        content_warnings=scan_document(raw),
         source_path=rel,
         content_hash=content_hash,
         raw=raw,

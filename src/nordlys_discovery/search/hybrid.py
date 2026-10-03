@@ -23,7 +23,7 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from ..db.models import ApiSpec, Chunk
+from ..db.models import ApiSpec, Chunk, DataProductRow
 from ..embeddings import EmbeddingProvider
 from .models import MatchedChunk, SearchFilters, SearchHit, SearchQuery, SearchResponse
 
@@ -192,6 +192,16 @@ def search(
             vector_rank=vec_rank.get(c.id),
         )
 
+    dp_ids = {a for (t, a, _), _ in ordered[: q.limit] if t == "data_product"}
+    dp_warnings: dict[str, list[str]] = {}
+    if dp_ids:
+        rows = session.execute(
+            select(DataProductRow.product_id, DataProductRow.content_warnings).where(
+                DataProductRow.product_id.in_(dp_ids)
+            )
+        )
+        dp_warnings = {pid: list(w) for pid, w in rows}
+
     hits: list[SearchHit] = []
     for (asset_type, asset_id, major), members in ordered[: q.limit]:
         members.sort(key=lambda sc: (-sc[0], sc[1].id))
@@ -209,6 +219,7 @@ def search(
                 sunset=meta.sunset if meta else None,
                 replacement=meta.replacement if meta else None,
                 pii_level=best.pii_level,
+                content_warnings=list(meta.content_warnings) if meta else dp_warnings.get(asset_id, []),
                 score=round(members[0][0], 6),
                 best_match=matched(best),
                 other_matches=[matched(c) for _, c in members[1:4]],

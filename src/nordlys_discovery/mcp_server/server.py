@@ -18,10 +18,11 @@ import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, NoReturn
 
+from mcp.server.auth.provider import TokenVerifier
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ResourceError, ResourceNotFoundError, ToolError
 from mcp.server.mcpserver.prompts.base import UserMessage
@@ -31,9 +32,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from ..access.policy import AccessDecision, AccessRequirements, decide
+from ..security.ratelimit import RateLimiter
 from ..service.access import AccessRequestOut
 from ..service.schemas import ApiDetails, DataProductDetails, Deprecation, EndpointSchema, VersionComparison
 from .catalog_client import CatalogClient, CatalogError
+from .guard import Caller, Guard, current_caller
 from .models import (
     AccessCheck,
     AccessRequestResult,
@@ -73,13 +76,7 @@ Rules:
 """
 
 
-@dataclass(frozen=True)
-class Caller:
-    subject: str
-    asset_scopes: frozenset[str] = field(default_factory=frozenset)
-
-
-CallerProvider = Callable[[], Caller]
+DEV_CALLER = Caller("dev.user@nordlys.example")
 
 
 def _fail(code: str, message: str, *, retryable: bool = False, **details: Any) -> NoReturn:
@@ -133,10 +130,31 @@ def _citation(asset_id: str, version: int | None, method: str | None, path: str 
 
 def build_server(
     catalog: CatalogClient,
-    caller_provider: CallerProvider,
     *,
+    dev_caller: Caller | None = DEV_CALLER,
+    token_verifier: TokenVerifier | None = None,
+    auth_settings: AuthSettings | None = None,
+    limiter: RateLimiter | None = None,
     today: Callable[[], date] = date.today,
 ) -> MCPServer[Any]:
+    """Build the server.
+
+    With `token_verifier` + `auth_settings`, every request needs a valid bearer token and
+    the caller comes from its claims. Without them (local dev, tests) every call runs as
+    `dev_caller`, which still goes through the same scope policy, rate limit and audit.
+    """
+    guard = Guard(
+        audit=catalog.write_audit,
+        limiter=limiter or RateLimiter(rate_per_minute=60, burst=20),
+        dev_caller=None if token_verifier else dev_caller,
+    )
+
+    def caller_now() -> Caller:
+        caller = current_caller.get()
+        if caller is None:  # the guard always sets it for tool calls
+            _fail("unauthenticated", "no caller in context")
+        return caller
+
     @asynccontextmanager
     async def lifespan(_: MCPServer[Any]) -> AsyncIterator[None]:
         try:
@@ -150,6 +168,9 @@ def build_server(
         version="0.3.0",
         instructions=INSTRUCTIONS,
         lifespan=lifespan,
+        token_verifier=token_verifier,
+        auth=auth_settings,
+        middleware=[guard],
     )
     read_only = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
 
@@ -200,6 +221,7 @@ def build_server(
                     sunset=h["sunset"],
                     replacement=h["replacement"],
                     pii_level=h["pii_level"],
+                    content_warnings=h.get("content_warnings", []),
                     best_match=MatchSummary(
                         **{k: b[k] for k in ("kind", "title", "method", "path", "field_name", "snippet")}
                     ),
@@ -245,11 +267,28 @@ def build_server(
         return _parse(VersionComparison, await _call(catalog.compare(api_id, from_version, to_version)))
 
     @mcp.tool(annotations=read_only)
-    async def get_data_product(product_id: AssetId) -> DataProductDetails:
+    async def get_data_product(product_id: AssetId, include_samples: bool = False) -> DataProductDetails:
         """The data contract of a data product: owner, schema with field-level PII, freshness SLA,
         quality checks, PII classification, allowed and prohibited purposes, access scope and
-        output ports. Sample rows are never returned by discovery."""
-        return _parse(DataProductDetails, await _call(catalog.data_product(product_id)))
+        output ports. With include_samples=true, example rows are added only if the data policy
+        allows it for this user: never for personal or sensitive data unless the user already
+        holds the product's own access scope. A refusal is explained in sample_policy_reason."""
+        details = _parse(DataProductDetails, await _call(catalog.data_product(product_id)))
+        if not include_samples:
+            return details
+        try:
+            samples = await catalog.sample_rows(product_id)
+        except CatalogError as exc:
+            if exc.code != "forbidden":
+                _fail(exc.code, exc.message, retryable=exc.retryable)
+            return details.model_copy(update={"sample_policy_reason": exc.message})
+        return details.model_copy(
+            update={
+                "sample_rows": samples["rows"],
+                "sample_rows_withheld": False,
+                "sample_policy_reason": samples["policy_reason"],
+            }
+        )
 
     async def _decision(
         asset_type: AssetType, asset_id: str, version: int | None, purpose: str | None
@@ -257,7 +296,7 @@ def build_server(
         if asset_type == "api" and version is None:
             _fail("invalid_argument", "version is required when asset_type is 'api'")
         req = _parse(AccessRequirements, await _call(catalog.access_requirements(asset_type, asset_id, version)))
-        caller = caller_provider()
+        caller = caller_now()
         return caller, decide(req, caller.asset_scopes, purpose)
 
     @mcp.tool(annotations=read_only)

@@ -1,0 +1,131 @@
+{
+  "realm": "nordlys",
+  "enabled": true,
+  "displayName": "Nordlys Insurance (local development)",
+  "sslRequired": "external",
+  "accessTokenLifespan": 300,
+  "revokeRefreshToken": true,
+  "defaultDefaultClientScopes": ["basic", "profile"],
+  "clientScopes": [
+    {
+      "name": "basic",
+      "protocol": "openid-connect",
+      "attributes": {"include.in.token.scope": "false"},
+      "protocolMappers": [
+        {"name": "sub", "protocol": "openid-connect", "protocolMapper": "oidc-sub-mapper",
+         "config": {"access.token.claim": "true", "introspection.token.claim": "true"}}
+      ]
+    },
+    {
+      "name": "profile",
+      "protocol": "openid-connect",
+      "attributes": {"include.in.token.scope": "true"},
+      "protocolMappers": [
+        {"name": "username", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-attribute-mapper",
+         "config": {"user.attribute": "username", "claim.name": "preferred_username", "jsonType.label": "String",
+                    "access.token.claim": "true", "id.token.claim": "true"}},
+        {"name": "email", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-attribute-mapper",
+         "config": {"user.attribute": "email", "claim.name": "email", "jsonType.label": "String",
+                    "access.token.claim": "true", "id.token.claim": "true"}}
+      ]
+    },
+    {
+      "name": "aud-nordlys-mcp",
+      "description": "Binds tokens to the MCP server (resource indicator / audience).",
+      "protocol": "openid-connect",
+      "attributes": {"include.in.token.scope": "false"},
+      "protocolMappers": [
+        {"name": "audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+         "config": {"included.custom.audience": "nordlys-mcp", "access.token.claim": "true"}}
+      ]
+    },
+    {
+      "name": "aud-nordlys-catalog",
+      "description": "Binds tokens to the catalog service.",
+      "protocol": "openid-connect",
+      "attributes": {"include.in.token.scope": "false"},
+      "protocolMappers": [
+        {"name": "audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+         "config": {"included.custom.audience": "nordlys-catalog", "access.token.claim": "true"}}
+      ]
+    },
+    {"name": "catalog.read", "description": "Search and read API/data product metadata", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
+    {"name": "dataproduct.read", "description": "Read data contracts (and non-sensitive samples)", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
+    {"name": "access.request", "description": "File access requests", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
+    {"name": "access.approve", "description": "Decide access requests (approvers)", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
+    {"name": "catalog.internal", "description": "Service-to-service calls to the catalog", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}},
+    {"name": "claims.search", "description": "Example asset scope: Claims Search API", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}}
+  ],
+  "clients": [
+    {
+      "clientId": "nordlys-discovery-agent",
+      "name": "Discovery agent (service account)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "local-agent-secret-change-me",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": ["basic", "profile", "aud-nordlys-mcp", "catalog.read", "dataproduct.read", "access.request"],
+      "optionalClientScopes": ["claims.search"]
+    },
+    {
+      "clientId": "nordlys-mcp-server",
+      "name": "MCP server (calls the catalog)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "local-mcp-secret-change-me",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": ["basic", "aud-nordlys-catalog", "catalog.internal"]
+    },
+    {
+      "clientId": "nordlys-n8n",
+      "name": "n8n workflows",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "local-n8n-secret-change-me",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": ["basic", "aud-nordlys-catalog", "catalog.internal", "access.approve"]
+    },
+    {
+      "clientId": "nordlys-dev-cli",
+      "name": "LOCAL DEV ONLY - password grant for scripted user tokens (not OAuth 2.1; absent in Azure)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:*", "http://127.0.0.1:*"],
+      "attributes": {"pkce.code.challenge.method": "S256"},
+      "protocol": "openid-connect",
+      "defaultClientScopes": ["basic", "profile", "aud-nordlys-mcp", "catalog.read", "dataproduct.read", "access.request"],
+      "optionalClientScopes": ["claims.search"]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "email": "alice@nordlys.example",
+      "firstName": "Alice",
+      "lastName": "Developer",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{"type": "password", "value": "alice-local", "temporary": false}]
+    },
+    {
+      "username": "bob",
+      "email": "bob@nordlys.example",
+      "firstName": "Bob",
+      "lastName": "Approver",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{"type": "password", "value": "bob-local", "temporary": false}]
+    }
+  ]
+}

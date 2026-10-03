@@ -9,9 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
+
+from .guard import current_caller
+
+TokenProvider = Callable[[], Awaitable[str]]
 
 log = logging.getLogger(__name__)
 RETRYABLE_STATUS = {502, 503, 504}
@@ -34,7 +40,13 @@ def _error_from(resp: httpx.Response) -> CatalogError:
         detail = body.get("detail") or body.get("title") or resp.text
     except ValueError:
         detail = resp.text[:300]
-    code = {404: "not_found", 409: "rule_violation", 422: "invalid_argument"}.get(resp.status_code, "upstream_error")
+    code = {
+        401: "upstream_auth_error",
+        403: "forbidden",
+        404: "not_found",
+        409: "rule_violation",
+        422: "invalid_argument",
+    }.get(resp.status_code, "upstream_error")
     return CatalogError(code, str(detail), retryable=resp.status_code >= 500, status=resp.status_code)
 
 
@@ -46,7 +58,9 @@ class CatalogClient:
         timeout_s: float = 5.0,
         retries: int = 2,
         transport: httpx.AsyncBaseTransport | None = None,
+        token_provider: TokenProvider | None = None,
     ) -> None:
+        self._token_provider = token_provider
         self._http = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=httpx.Timeout(timeout_s, connect=min(2.0, timeout_s)),
@@ -62,6 +76,13 @@ class CatalogClient:
         self, method: str, path: str, *, params: Any = None, json: Any = None, request_id: str | None = None
     ) -> Any:
         headers = {"X-Request-ID": request_id} if request_id else {}
+        caller = current_caller.get()
+        if caller is not None:
+            # Identity of the end user this call is made for; trusted only from allow-listed clients.
+            headers["X-On-Behalf-Of-Subject"] = caller.subject
+            headers["X-On-Behalf-Of-Scopes"] = " ".join(sorted(caller.all_scopes))
+        if self._token_provider is not None:
+            headers["Authorization"] = f"Bearer {await self._token_provider()}"
         for attempt in range(self._retries + 1):
             try:
                 resp = await self._http.request(method, path, params=params, json=json, headers=headers)
@@ -128,9 +149,44 @@ class CatalogClient:
         # POST is not retried automatically; the endpoint is idempotent, so the agent may safely retry.
         return await self._request("POST", "/v1/access-requests", json=body)
 
+    async def sample_rows(self, product_id: str) -> Any:
+        return await self._request("GET", f"/v1/data-products/{product_id}/samples")
+
+    async def write_audit(self, event: dict[str, Any]) -> None:
+        await self._request("POST", "/v1/audit-events", json=event)
+
     async def ready(self) -> bool:
         try:
             resp = await self._http.get("/health/ready")
             return resp.status_code == 200
         except httpx.TransportError:
             return False
+
+
+class ClientCredentialsTokens:
+    """OAuth 2.1 client-credentials tokens for service-to-service calls, cached until near expiry."""
+
+    def __init__(self, token_url: str, client_id: str, client_secret: str, *, timeout_s: float = 5.0) -> None:
+        self._url, self._id, self._secret = token_url, client_id, client_secret
+        self._timeout = timeout_s
+        self._token: str | None = None
+        self._expires_at = 0.0
+
+    async def __call__(self) -> str:
+        if self._token and time.time() < self._expires_at - 30:
+            return self._token
+        async with httpx.AsyncClient(timeout=self._timeout) as http:
+            resp = await http.post(
+                self._url,
+                data={"grant_type": "client_credentials", "client_id": self._id, "client_secret": self._secret},
+            )
+        if not resp.is_success:
+            raise CatalogError(
+                "upstream_auth_error",
+                f"could not obtain a service token: HTTP {resp.status_code}",
+                retryable=resp.status_code >= 500,
+            )
+        body = resp.json()
+        self._token = str(body["access_token"])
+        self._expires_at = time.time() + float(body.get("expires_in", 60))
+        return self._token

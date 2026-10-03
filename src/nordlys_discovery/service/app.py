@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from datetime import date
 from typing import Annotated, Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import Engine, func, select, text
@@ -30,9 +30,12 @@ from ..db.session import make_engine
 from ..embeddings import EmbeddingError, EmbeddingProvider, create_provider
 from ..search.hybrid import SearchParams, search
 from ..search.models import AssetType, Country, Domain, SearchFilters, SearchMode, SearchQuery, SearchResponse
-from . import access
+from ..security.policy import sample_rows_decision
+from . import access, audit
 from . import repository as repo
 from . import schemas as S
+from .auth import CallContext, CatalogAuth
+from .events import AccessRequestNotifier
 
 log = logging.getLogger(__name__)
 PROBLEM_JSON = "application/problem+json"
@@ -54,10 +57,24 @@ def db(request: Request) -> Iterator[Session]:
 DB = Annotated[Session, Depends(db)]
 
 
+def call_context(request: Request) -> CallContext:
+    """Authenticate the calling service and resolve the end user it acts for."""
+    auth: CatalogAuth = request.app.state.auth
+    return auth(request)
+
+
+Ctx = Annotated[CallContext, Depends(call_context)]
+
+
 def create_app(
-    settings: Settings | None = None, *, engine: Engine | None = None, embedder: EmbeddingProvider | None = None
+    settings: Settings | None = None,
+    *,
+    engine: Engine | None = None,
+    embedder: EmbeddingProvider | None = None,
+    auth: CatalogAuth | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
+    notifier = AccessRequestNotifier.from_settings(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -83,6 +100,9 @@ def create_app(
         summary="Search and inspect Nordlys Insurance APIs and Data Products.",
         lifespan=lifespan,
     )
+    app.state.auth = auth or CatalogAuth(settings)
+    # Every /v1 route requires an authenticated service; health probes stay public.
+    v1 = APIRouter(dependencies=[Depends(call_context)])
     params = SearchParams(
         candidates=settings.search_candidates, rrf_k=settings.rrf_k, bm25_k1=settings.bm25_k1, bm25_b=settings.bm25_b
     )
@@ -150,7 +170,7 @@ def create_app(
 
     # ------------------------------------------------------------------ search
 
-    @app.get("/v1/search", response_model=SearchResponse, tags=["search"])
+    @v1.get("/v1/search", response_model=SearchResponse, tags=["search"])
     def search_catalog(
         request: Request,
         session: DB,
@@ -184,21 +204,21 @@ def create_app(
 
     # ------------------------------------------------------------------ APIs
 
-    @app.get("/v1/apis", response_model=list[S.ApiSummary], tags=["apis"])
+    @v1.get("/v1/apis", response_model=list[S.ApiSummary], tags=["apis"])
     def list_apis(
         session: DB, domain: Domain | None = None, country: Country | None = None, deprecated: bool | None = None
     ) -> list[S.ApiSummary]:
         return repo.list_apis(session, domain=domain, country=country, deprecated=deprecated)
 
-    @app.get("/v1/apis/{api_id}", response_model=list[S.ApiSummary], tags=["apis"])
+    @v1.get("/v1/apis/{api_id}", response_model=list[S.ApiSummary], tags=["apis"])
     def api_versions(session: DB, api_id: str) -> list[S.ApiSummary]:
         return repo.api_versions(session, api_id)
 
-    @app.get("/v1/apis/{api_id}/v{major}", response_model=S.ApiDetails, tags=["apis"])
+    @v1.get("/v1/apis/{api_id}/v{major}", response_model=S.ApiDetails, tags=["apis"])
     def api_details(session: DB, api_id: str, major: int) -> S.ApiDetails:
         return repo.api_details(session, api_id, major)
 
-    @app.get("/v1/apis/{api_id}/v{major}/endpoint", response_model=S.EndpointSchema, tags=["apis"])
+    @v1.get("/v1/apis/{api_id}/v{major}/endpoint", response_model=S.EndpointSchema, tags=["apis"])
     def endpoint_schema(
         session: DB,
         api_id: str,
@@ -208,23 +228,23 @@ def create_app(
     ) -> S.EndpointSchema:
         return repo.endpoint_schema(session, api_id, major, method, path)
 
-    @app.get("/v1/apis/{api_id}/v{major}/spec", tags=["apis"])
+    @v1.get("/v1/apis/{api_id}/v{major}/spec", tags=["apis"])
     def raw_spec(session: DB, api_id: str, major: int) -> dict[str, Any]:
         return repo.raw_spec(session, api_id, major)
 
-    @app.get("/v1/apis/{api_id}/compare", response_model=S.VersionComparison, tags=["apis"])
+    @v1.get("/v1/apis/{api_id}/compare", response_model=S.VersionComparison, tags=["apis"])
     def compare(
         session: DB, api_id: str, from_version: Annotated[int, Query(ge=1)], to_version: Annotated[int, Query(ge=1)]
     ) -> S.VersionComparison:
         return repo.compare_versions(session, api_id, from_version, to_version)
 
-    @app.get("/v1/deprecations", response_model=list[S.Deprecation], tags=["apis"])
+    @v1.get("/v1/deprecations", response_model=list[S.Deprecation], tags=["apis"])
     def deprecations(session: DB, sunset_before: date | None = None) -> list[S.Deprecation]:
         return repo.deprecations(session, today=date.today(), sunset_before=sunset_before)
 
     # ------------------------------------------------------------------ data products
 
-    @app.get("/v1/data-products", response_model=list[S.DataProductSummary], tags=["data-products"])
+    @v1.get("/v1/data-products", response_model=list[S.DataProductSummary], tags=["data-products"])
     def list_data_products(
         session: DB, domain: Domain | None = None, country: Country | None = None, pii_level: PiiLevel | None = None
     ) -> list[S.DataProductSummary]:
@@ -232,10 +252,30 @@ def create_app(
             session, domain=domain, country=country, pii_level=pii_level.value if pii_level else None
         )
 
-    @app.get("/v1/data-products/{product_id}", response_model=S.DataProductDetails, tags=["data-products"])
+    @v1.get("/v1/data-products/{product_id}", response_model=S.DataProductDetails, tags=["data-products"])
     def get_data_product(session: DB, product_id: str) -> S.DataProductDetails:
-        # Sample rows are never served here; Phase 4 adds a policy-checked path for them.
+        """Contract and metadata only. Sample rows have their own policy-checked endpoint."""
         return repo.data_product(session, product_id, include_samples=False)
+
+    @v1.get("/v1/data-products/{product_id}/samples", response_model=S.SampleRows, tags=["data-products"])
+    def get_sample_rows(request: Request, session: DB, ctx: Ctx, product_id: str) -> S.SampleRows:
+        """Example rows, only where the data policy allows it for the calling user."""
+        dp = repo.data_product(session, product_id, include_samples=True)
+        decision = sample_rows_decision(dp.pii_classification, dp.contract["access"]["scope"], ctx.user_scopes)
+        audit.write(
+            session,
+            source=ctx.service,
+            actor=ctx.user,
+            action="data_product.samples",
+            resource=f"data_product:{product_id}",
+            decision="allowed" if decision.allowed else "denied",
+            reason=decision.reason,
+            request_id=request.state.request_id,
+        )
+        if not decision.allowed:
+            session.commit()  # keep the audit record even though we refuse
+            raise HTTPException(403, decision.reason)
+        return S.SampleRows(product_id=product_id, rows=dp.sample_rows or [], policy_reason=decision.reason)
 
     # ------------------------------------------------------------------ access
 
@@ -243,7 +283,7 @@ def create_app(
     async def _rule(request: Request, exc: access.AccessRuleViolation) -> JSONResponse:
         return problem(request, 409, "Access rule violation", str(exc))
 
-    @app.get("/v1/access/requirements", response_model=AccessRequirements, tags=["access"])
+    @v1.get("/v1/access/requirements", response_model=AccessRequirements, tags=["access"])
     def access_requirements(
         session: DB,
         asset_type: Literal["api", "data_product"],
@@ -252,13 +292,42 @@ def create_app(
     ) -> AccessRequirements:
         return access.requirements(session, asset_type, asset_id, version)
 
-    @app.post("/v1/access-requests", response_model=access.AccessRequestOut, tags=["access"])
-    def create_access_request(session: DB, body: access.AccessRequestIn, response: Response) -> access.AccessRequestOut:
+    @v1.post("/v1/access-requests", response_model=access.AccessRequestOut, tags=["access"])
+    def create_access_request(
+        request: Request,
+        session: DB,
+        ctx: Ctx,
+        body: access.AccessRequestIn,
+        response: Response,
+        background: BackgroundTasks,
+    ) -> access.AccessRequestOut:
+        if settings.auth_enabled:
+            # The requester is whoever the authenticated service acts for, never a body field.
+            body = body.model_copy(update={"requester": ctx.user})
+        if not ctx.has("access.request") and settings.auth_enabled:
+            raise HTTPException(403, "User lacks scope access.request")
         out = access.create(session, body)
         response.status_code = 201 if out.created else 200
+        if out.created:
+            audit.write(
+                session,
+                source=ctx.service,
+                actor=out.requester,
+                action="access_request.created",
+                resource=f"{out.asset_type}:{out.asset_id}" + (f":v{out.major_version}" if out.major_version else ""),
+                decision="pending",
+                reason=f"route {out.approval_route}; approvers {', '.join(out.approvers)}",
+                request_id=request.state.request_id,
+                access_request_id=str(out.id),
+                purpose=out.purpose,
+                scope=out.requested_scope,
+            )
+            session.commit()  # the workflow must only ever see committed requests
+            if notifier is not None:
+                background.add_task(notifier.notify, out, request.state.request_id, request.app.state.sessions)
         return out
 
-    @app.get("/v1/access-requests", response_model=list[access.AccessRequestOut], tags=["access"])
+    @v1.get("/v1/access-requests", response_model=list[access.AccessRequestOut], tags=["access"])
     def list_access_requests(
         session: DB,
         requester: Annotated[str | None, Query(pattern=access.IDENTITY_PATTERN)] = None,
@@ -266,15 +335,63 @@ def create_app(
     ) -> list[access.AccessRequestOut]:
         return access.list_for(session, requester, status)
 
-    @app.get("/v1/access-requests/{request_id}", response_model=access.AccessRequestOut, tags=["access"])
+    @v1.get("/v1/access-requests/{request_id}", response_model=access.AccessRequestOut, tags=["access"])
     def get_access_request(session: DB, request_id: uuid.UUID) -> access.AccessRequestOut:
         return access.get(session, request_id)
 
-    @app.post("/v1/access-requests/{request_id}/decision", response_model=access.AccessRequestOut, tags=["access"])
-    def decide_access_request(session: DB, request_id: uuid.UUID, body: access.DecisionIn) -> access.AccessRequestOut:
-        """Human approval step. Phase 4 restricts this to tokens with an approver role."""
-        return access.decide(session, request_id, body)
+    @v1.post("/v1/access-requests/{request_id}/decision", response_model=access.AccessRequestOut, tags=["access"])
+    def decide_access_request(
+        request: Request, session: DB, ctx: Ctx, request_id: uuid.UUID, body: access.DecisionIn
+    ) -> access.AccessRequestOut:
+        """Record a human approver's decision. Requires access.approve for the acting user."""
+        if not ctx.has("access.approve"):
+            audit.write(
+                session,
+                source=ctx.service,
+                actor=ctx.user,
+                action="access_request.decision",
+                resource=f"access_request:{request_id}",
+                decision="denied",
+                reason="missing scope access.approve",
+                request_id=request.state.request_id,
+            )
+            session.commit()
+            raise HTTPException(403, "Deciding access requests requires access.approve")
+        if settings.auth_enabled:
+            body = body.model_copy(update={"decided_by": ctx.user})
+        out = access.decide(session, request_id, body)
+        audit.write(
+            session,
+            source=ctx.service,
+            actor=out.decided_by or ctx.user,
+            action="access_request.decision",
+            resource=f"{out.asset_type}:{out.asset_id}" + (f":v{out.major_version}" if out.major_version else ""),
+            decision=out.status,
+            reason=out.decision_note,
+            request_id=request.state.request_id,
+            access_request_id=str(out.id),
+            requester=out.requester,
+        )
+        return out
 
+    # ------------------------------------------------------------------ audit
+
+    @v1.post("/v1/audit-events", response_model=audit.AuditEventOut, status_code=201, tags=["audit"])
+    def write_audit_event(session: DB, ctx: Ctx, body: audit.AuditEventIn) -> audit.AuditEventOut:
+        """Append an event. `source` is always the authenticated service, never a body field."""
+        return audit.record(session, ctx.service, body)
+
+    @v1.get("/v1/audit-events", response_model=list[audit.AuditEventOut], tags=["audit"])
+    def read_audit_events(
+        session: DB,
+        actor: str | None = None,
+        action: str | None = None,
+        request_id: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    ) -> list[audit.AuditEventOut]:
+        return audit.query(session, actor=actor, action=action, request_id=request_id, limit=limit)
+
+    app.include_router(v1)
     return app
 
 

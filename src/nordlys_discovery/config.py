@@ -55,6 +55,25 @@ class Settings(BaseSettings):
     mcp_dev_subject: str = "dev.user@nordlys.example"
     mcp_dev_asset_scopes: list[str] = Field(default_factory=list)
 
+    # Security (Phase 4). Off by default so unit tests and quick local runs need no IdP;
+    # docker-compose and Azure turn it on.
+    auth_enabled: bool = False
+    oidc_issuer: str = "http://localhost:8080/realms/nordlys"
+    oidc_jwks_url: str | None = None  # internal URL when the issuer's public URL is not reachable
+    catalog_audience: str = "nordlys-catalog"
+    mcp_audience: str = "nordlys-mcp"
+    mcp_public_url: str = "http://localhost:8001/mcp"
+    # Services allowed to call the catalog on behalf of an end user (X-On-Behalf-Of-* headers).
+    trusted_service_clients: list[str] = Field(default_factory=lambda: ["nordlys-mcp-server", "nordlys-n8n"])
+    # The MCP server's own credentials for calling the catalog (client credentials grant).
+    mcp_client_id: str = "nordlys-mcp-server"
+    mcp_client_secret: SecretStr | None = None
+    rate_limit_per_minute: int = 60
+    rate_limit_burst: int = 20
+    # Workflow A: request_access notifies n8n (empty = no workflow, request just stays pending).
+    access_request_webhook_url: str | None = None
+    access_request_webhook_secret: SecretStr | None = None
+
     log_level: str = "INFO"
 
 

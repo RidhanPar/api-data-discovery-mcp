@@ -111,6 +111,7 @@ def api_details(session: Session, api_id: str, major: int) -> S.ApiDetails:
             description_coverage=round(description_coverage(doc), 2),
             has_api_description=bool(row.description),
             metadata_provenance=row.metadata_provenance,
+            content_warnings=list(row.content_warnings or []),
         ),
         other_versions=[
             r.major_version
@@ -216,6 +217,7 @@ def data_product(session: Session, product_id: str, *, include_samples: bool = F
     return S.DataProductDetails(
         **_dp_summary(r).model_dump(),
         description=r.description,
+        content_warnings=list(r.content_warnings or []),
         contract=contract,
         sample_rows=samples if include_samples else None,
         sample_rows_withheld=not include_samples and bool(samples),

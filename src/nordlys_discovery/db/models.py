@@ -19,12 +19,14 @@ from typing import Any
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     ARRAY,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Computed,
     Date,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     String,
@@ -62,6 +64,7 @@ class ApiSpec(Base):
     sunset: Mapped[date | None] = mapped_column(Date)
     replacement: Mapped[str | None] = mapped_column(String(160))
     metadata_provenance: Mapped[dict[str, str]] = mapped_column(JSONB)
+    content_warnings: Mapped[list[str]] = mapped_column(ARRAY(String(40)), server_default=text("'{}'"), default=list)
     source_path: Mapped[str] = mapped_column(String(300))
     content_hash: Mapped[str] = mapped_column(String(64))
     raw: Mapped[dict[str, Any]] = mapped_column(JSONB)
@@ -83,6 +86,7 @@ class DataProductRow(Base):
     countries: Mapped[list[str]] = mapped_column(ARRAY(String(2)))
     pii_classification: Mapped[str] = mapped_column(String(20))
     description: Mapped[str] = mapped_column(Text)
+    content_warnings: Mapped[list[str]] = mapped_column(ARRAY(String(40)), server_default=text("'{}'"), default=list)
     source_path: Mapped[str] = mapped_column(String(300))
     content_hash: Mapped[str] = mapped_column(String(64))
     raw: Mapped[dict[str, Any]] = mapped_column(JSONB)
@@ -173,3 +177,32 @@ class AccessRequest(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     decided_by: Mapped[str | None] = mapped_column(String(200))
     decision_note: Mapped[str | None] = mapped_column(Text)
+
+
+AUDIT_DECISIONS = ("allowed", "denied", "invalid", "error", "pending", "approved", "rejected", "expired", "info")
+
+
+class AuditEvent(Base):
+    """Append-only (enforced by database triggers, see migration 0003)."""
+
+    __tablename__ = "audit_event"
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('allowed', 'denied', 'invalid', 'error', 'pending', 'approved', 'rejected', 'expired', "
+            "'info')",
+            name="ck_audit_event_decision",
+        ),
+        Index("ix_audit_event_actor_time", "actor", "occurred_at"),
+        Index("ix_audit_event_action_time", "action", "occurred_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    source: Mapped[str] = mapped_column(String(60))
+    actor: Mapped[str] = mapped_column(String(200))
+    action: Mapped[str] = mapped_column(String(80))
+    resource: Mapped[str | None] = mapped_column(String(300))
+    decision: Mapped[str] = mapped_column(String(20))
+    reason: Mapped[str | None] = mapped_column(Text)
+    request_id: Mapped[str | None] = mapped_column(String(80))
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"), default=dict)

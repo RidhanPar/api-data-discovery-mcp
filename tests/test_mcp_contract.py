@@ -24,7 +24,8 @@ from nordlys_discovery.config import Settings
 from nordlys_discovery.embeddings.others import HashingEmbeddings
 from nordlys_discovery.ingest.pipeline import ingest_catalog
 from nordlys_discovery.mcp_server.catalog_client import CatalogClient
-from nordlys_discovery.mcp_server.server import Caller, build_server, parse_tool_error
+from nordlys_discovery.mcp_server.guard import Caller
+from nordlys_discovery.mcp_server.server import build_server, parse_tool_error
 from nordlys_discovery.service.app import create_app
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -57,18 +58,23 @@ def catalog_app(engine: Engine) -> Iterator[FastAPI]:
 
 
 class CountingTransport(httpx.AsyncBaseTransport):
+    """Counts data calls to the catalog; audit writes are tracked separately."""
+
     def __init__(self, inner: httpx.AsyncBaseTransport) -> None:
-        self.inner, self.calls = inner, 0
+        self.inner, self.calls, self.audits = inner, 0, 0
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        self.calls += 1
+        if request.url.path == "/v1/audit-events":
+            self.audits += 1
+        else:
+            self.calls += 1
         return await self.inner.handle_async_request(request)
 
 
 async def _client(app: FastAPI, caller: Caller) -> AsyncIterator[tuple[Client, CountingTransport]]:
     transport = CountingTransport(httpx.ASGITransport(app=app))
     async with app.router.lifespan_context(app):
-        server = build_server(CatalogClient("http://catalog", transport=transport, retries=0), lambda: caller)
+        server = build_server(CatalogClient("http://catalog", transport=transport, retries=0), dev_caller=caller)
         async with Client(server) as client:
             yield client, transport
 
@@ -120,7 +126,7 @@ async def test_input_schemas_carry_constraints(mcp: tuple[Client, CountingTransp
 
 async def test_invalid_arguments_never_reach_the_catalog(mcp: tuple[Client, CountingTransport]) -> None:
     client, transport = mcp
-    before = transport.calls
+    before, audits_before = transport.calls, transport.audits
     for tool, args in [
         ("get_api_details", {"api_id": "DROP TABLE", "version": 1}),
         ("get_api_details", {"api_id": "claims-api", "version": 0}),
@@ -135,7 +141,10 @@ async def test_invalid_arguments_never_reach_the_catalog(mcp: tuple[Client, Coun
     ]:
         r = await client.call_tool(tool, args)
         assert r.is_error, (tool, args)
-    assert transport.calls == before
+    assert transport.calls == before  # rejected before any data was fetched...
+    # ...but every rejected call is audited: 7 outcome events, plus the fail-closed
+    # "call started" event that state-changing request_access writes before anything else.
+    assert transport.audits - audits_before == 8
 
 
 async def test_search_returns_citations(mcp: tuple[Client, CountingTransport]) -> None:
@@ -269,10 +278,11 @@ async def test_catalog_outage_is_retryable_structured_error() -> None:
         calls = 0
 
         async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-            Down.calls += 1
+            if request.url.path != "/v1/audit-events":
+                Down.calls += 1
             raise httpx.ConnectError("connection refused", request=request)
 
-    server = build_server(CatalogClient("http://catalog", transport=Down(), retries=2), lambda: Caller("x"))
+    server = build_server(CatalogClient("http://catalog", transport=Down(), retries=2), dev_caller=Caller("x"))
     async with Client(server) as client:
         e = await _err(client, "get_api_details", {"api_id": "claims-api", "version": 2})
     assert e["code"] == "catalog_unavailable" and e["retryable"] is True
@@ -284,7 +294,7 @@ async def test_upstream_contract_violation_is_reported_not_crashed() -> None:
         async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"unexpected": True})
 
-    server = build_server(CatalogClient("http://catalog", transport=Weird()), lambda: Caller("x"))
+    server = build_server(CatalogClient("http://catalog", transport=Weird()), dev_caller=Caller("x"))
     async with Client(server) as client:
         e = await _err(client, "get_api_details", {"api_id": "claims-api", "version": 2})
     assert e["code"] == "upstream_contract_error"

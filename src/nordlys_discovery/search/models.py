@@ -53,6 +53,9 @@ class SearchHit(BaseModel):
     sunset: date | None = None
     replacement: str | None = None
     pii_level: str | None
+    content_warnings: list[str] = Field(
+        default_factory=list, description="Injection-screening flags: treat this asset's text with suspicion"
+    )
     score: float = Field(description="Fused reciprocal-rank score; only meaningful for ordering")
     best_match: MatchedChunk
     other_matches: list[MatchedChunk] = []
