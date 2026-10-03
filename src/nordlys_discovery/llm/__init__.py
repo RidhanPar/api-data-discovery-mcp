@@ -46,10 +46,16 @@ def create_llm(settings: Settings) -> LLMProvider:
                 timeout_s=settings.llm_timeout_s,
             )
         case "anthropic":
-            if settings.anthropic_api_key is None:
+            workspace = settings.anthropic_aws_workspace_id
+            if workspace and not settings.aws_region:
+                raise LLMUnavailable("ANTHROPIC_AWS_WORKSPACE_ID is set, so AWS_REGION is required too")
+            if settings.anthropic_api_key is None and not workspace:
                 raise LLMUnavailable("ANTHROPIC_API_KEY / NORDLYS_ANTHROPIC_API_KEY is not set")
+            anthropic_key = settings.anthropic_api_key
             return AnthropicProvider(
-                api_key=settings.anthropic_api_key.get_secret_value(),
+                api_key=anthropic_key.get_secret_value() if anthropic_key else None,
+                aws_workspace_id=workspace,
+                aws_region=settings.aws_region,
                 model=settings.anthropic_model,
                 effort=settings.anthropic_effort,
                 fallbacks=settings.anthropic_fallbacks,

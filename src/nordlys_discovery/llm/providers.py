@@ -160,23 +160,40 @@ class AnthropicProvider:
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str | None,
         model: str,
         effort: str = "medium",
         fallbacks: bool = True,
         timeout_s: float = 60.0,
         max_retries: int = 3,
+        aws_workspace_id: str | None = None,
+        aws_region: str | None = None,
     ) -> None:
-        from anthropic import AsyncAnthropic
+        """With `aws_workspace_id` the client targets Claude Platform on AWS (same API,
+        routed to that workspace in `aws_region`); otherwise the Claude API."""
+        if aws_workspace_id:
+            from anthropic import AsyncAnthropicAWS
 
-        self._client = AsyncAnthropic(api_key=api_key, timeout=timeout_s, max_retries=max_retries)
+            self._client: Any = AsyncAnthropicAWS(
+                api_key=api_key,  # AWS short-term API key; None -> SigV4 from the AWS credential chain
+                workspace_id=aws_workspace_id,
+                aws_region=aws_region,
+                timeout=timeout_s,
+                max_retries=max_retries,
+            )
+            self._provider = "anthropic-aws"
+        else:
+            from anthropic import AsyncAnthropic
+
+            self._client = AsyncAnthropic(api_key=api_key, timeout=timeout_s, max_retries=max_retries)
+            self._provider = "anthropic"
         self._model = model
         self._effort = effort
         self._fallbacks = fallbacks
 
     @property
     def model_id(self) -> str:
-        return f"anthropic:{self._model}"
+        return f"{self._provider}:{self._model}"
 
     @staticmethod
     def _messages(messages: list[Message]) -> list[dict[str, Any]]:

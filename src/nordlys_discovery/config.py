@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-opus-5-5"
     anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     anthropic_fallbacks: bool = True  # server-side refusal fallbacks (beta)
+    # Claude Platform on AWS (Anthropic-operated, AWS billing): requests are routed by
+    # workspace id and region. Setting the workspace id switches the Anthropic provider to
+    # it. Auth: ANTHROPIC_API_KEY holding an AWS short-term API key, or AWS credentials
+    # (SigV4) from the usual AWS environment/profile chain when no key is set.
+    anthropic_aws_workspace_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("NORDLYS_ANTHROPIC_AWS_WORKSPACE_ID", "ANTHROPIC_AWS_WORKSPACE_ID"),
+    )
+    aws_region: str | None = Field(default=None, validation_alias=AliasChoices("NORDLYS_AWS_REGION", "AWS_REGION"))
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4.1-mini"
 

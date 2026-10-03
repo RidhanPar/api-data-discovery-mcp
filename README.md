@@ -146,7 +146,9 @@ Without Docker, for search only: `make ingest && make serve`, then
 
 The agent needs an LLM. Set `NORDLYS_LLM_PROVIDER` (`azure-openai`, `anthropic` or
 `openai`) and its credentials in a git-ignored `.env`. Anthropic runs `claude-opus-5-5`
-with server-side refusal fallbacks enabled. Without an LLM, everything else works, and
+with server-side refusal fallbacks enabled. It reads `ANTHROPIC_API_KEY` for the Claude API,
+or, for Claude Platform on AWS, `ANTHROPIC_AWS_WORKSPACE_ID` + `AWS_REGION` (with an AWS
+short-term API key in `ANTHROPIC_API_KEY`, or AWS credentials). Without an LLM, everything else works, and
 Workflow B sends every registration to a human.
 
 ## MCP client demo
@@ -249,7 +251,7 @@ Every result file records the provider and model that produced it.
 
 ### Tests
 
-`make test`: **223 tests**, all passing. They cover:
+`make test`: **224 tests**, all passing. They cover:
 
 * unit tests and integration tests (real Postgres + pgvector via testcontainers; JWTs
   signed with a test key served as JWKS);

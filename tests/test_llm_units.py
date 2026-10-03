@@ -262,3 +262,27 @@ async def test_missing_tool_call_is_nudged_once() -> None:
     out, _ = await structured(llm, "s", "u", _Model)
     assert out.value == 3
     assert llm.calls[1][1].raw == [{"type": "text"}] and "submit tool" in llm.calls[1][2].content
+
+
+def test_claude_api_vs_claude_platform_on_aws() -> None:
+    from nordlys_discovery.config import Settings
+    from nordlys_discovery.llm import LLMUnavailable, create_llm
+
+    first_party = create_llm(Settings(llm_provider="anthropic", anthropic_api_key="test-not-a-key"))
+    assert first_party.model_id == "anthropic:claude-opus-5-5"
+    assert type(first_party._client).__name__ == "AsyncAnthropic"  # type: ignore[attr-defined]
+
+    aws = create_llm(
+        Settings(
+            llm_provider="anthropic",
+            anthropic_api_key="test-not-a-key",
+            ANTHROPIC_AWS_WORKSPACE_ID="wrkspc_test",
+            AWS_REGION="eu-west-1",
+        )
+    )
+    assert aws.model_id == "anthropic-aws:claude-opus-5-5"  # results say which platform produced them
+    client = aws._client  # type: ignore[attr-defined]
+    assert type(client).__name__ == "AsyncAnthropicAWS" and "eu-west-1" in str(client.base_url)
+
+    with pytest.raises(LLMUnavailable, match="AWS_REGION"):
+        create_llm(Settings(llm_provider="anthropic", ANTHROPIC_AWS_WORKSPACE_ID="wrkspc_test"))
