@@ -102,6 +102,7 @@ def api_details(session: Session, api_id: str, major: int) -> S.ApiDetails:
     return S.ApiDetails(
         **_summary(row).model_dump(),
         description=row.description,
+        data_classification=row.data_classification,
         servers=[s.get("url", "") for s in doc.get("servers", [])],
         security_schemes={k: v.get("type", "?") for k, v in schemes.items()},
         scopes=sorted({s for e in endpoints for s in e.scopes}),

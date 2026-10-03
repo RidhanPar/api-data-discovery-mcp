@@ -41,6 +41,7 @@ class DocQuality(BaseModel):
 
 class ApiDetails(ApiSummary):
     description: str | None
+    data_classification: str | None
     servers: list[str]
     security_schemes: dict[str, str]
     scopes: list[str]

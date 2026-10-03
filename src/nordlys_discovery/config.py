@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     bm25_k1: float = 1.2
     bm25_b: float = 0.75
 
+    # MCP server (Phase 3).
+    catalog_api_url: str = "http://localhost:8000"
+    catalog_timeout_s: float = 5.0
+    catalog_retries: int = 2
+    mcp_host: str = "127.0.0.1"
+    mcp_port: int = 8001
+    # Local-development caller identity. Phase 4 replaces this with validated JWT claims.
+    mcp_dev_subject: str = "dev.user@nordlys.example"
+    mcp_dev_asset_scopes: list[str] = Field(default_factory=list)
+
     log_level: str = "INFO"
 
 

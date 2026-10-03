@@ -1,4 +1,4 @@
-.PHONY: install model db migrate ingest serve search catalog generate test test-unit lint check down
+.PHONY: install model db migrate ingest serve mcp mcp-demo search catalog generate test test-unit lint check down
 
 install:
 	uv sync
@@ -17,6 +17,12 @@ ingest: migrate   ## idempotent: re-running only processes changes
 
 serve:            ## catalog service on http://localhost:8000/docs
 	uv run uvicorn nordlys_discovery.service.app:app --port 8000
+
+mcp:              ## MCP server, Streamable HTTP on http://localhost:8001/mcp (needs `make serve`)
+	uv run python -m nordlys_discovery.mcp_server
+
+mcp-demo:         ## scripted MCP client walk-through against the running server
+	uv run python scripts/mcp_client_demo.py
 
 search:           ## make search Q="open claims in Norway"
 	uv run python -m nordlys_discovery.search "$(Q)"

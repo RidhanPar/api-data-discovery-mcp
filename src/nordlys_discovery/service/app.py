@@ -14,14 +14,15 @@ import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import date
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import Engine, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..access.policy import AccessRequirements
 from ..catalog.models import PiiLevel
 from ..config import Settings, get_settings
 from ..db.models import Chunk
@@ -29,6 +30,7 @@ from ..db.session import make_engine
 from ..embeddings import EmbeddingError, EmbeddingProvider, create_provider
 from ..search.hybrid import SearchParams, search
 from ..search.models import AssetType, Country, Domain, SearchFilters, SearchMode, SearchQuery, SearchResponse
+from . import access
 from . import repository as repo
 from . import schemas as S
 
@@ -234,6 +236,44 @@ def create_app(
     def get_data_product(session: DB, product_id: str) -> S.DataProductDetails:
         # Sample rows are never served here; Phase 4 adds a policy-checked path for them.
         return repo.data_product(session, product_id, include_samples=False)
+
+    # ------------------------------------------------------------------ access
+
+    @app.exception_handler(access.AccessRuleViolation)
+    async def _rule(request: Request, exc: access.AccessRuleViolation) -> JSONResponse:
+        return problem(request, 409, "Access rule violation", str(exc))
+
+    @app.get("/v1/access/requirements", response_model=AccessRequirements, tags=["access"])
+    def access_requirements(
+        session: DB,
+        asset_type: Literal["api", "data_product"],
+        asset_id: Annotated[str, Query(pattern=r"^[a-z][a-z0-9-]{1,119}$")],
+        version: Annotated[int | None, Query(ge=1, le=99)] = None,
+    ) -> AccessRequirements:
+        return access.requirements(session, asset_type, asset_id, version)
+
+    @app.post("/v1/access-requests", response_model=access.AccessRequestOut, tags=["access"])
+    def create_access_request(session: DB, body: access.AccessRequestIn, response: Response) -> access.AccessRequestOut:
+        out = access.create(session, body)
+        response.status_code = 201 if out.created else 200
+        return out
+
+    @app.get("/v1/access-requests", response_model=list[access.AccessRequestOut], tags=["access"])
+    def list_access_requests(
+        session: DB,
+        requester: Annotated[str | None, Query(pattern=access.IDENTITY_PATTERN)] = None,
+        status: Literal["pending_approval", "approved", "rejected", "withdrawn"] | None = None,
+    ) -> list[access.AccessRequestOut]:
+        return access.list_for(session, requester, status)
+
+    @app.get("/v1/access-requests/{request_id}", response_model=access.AccessRequestOut, tags=["access"])
+    def get_access_request(session: DB, request_id: uuid.UUID) -> access.AccessRequestOut:
+        return access.get(session, request_id)
+
+    @app.post("/v1/access-requests/{request_id}/decision", response_model=access.AccessRequestOut, tags=["access"])
+    def decide_access_request(session: DB, request_id: uuid.UUID, body: access.DecisionIn) -> access.AccessRequestOut:
+        """Human approval step. Phase 4 restricts this to tokens with an approver role."""
+        return access.decide(session, request_id, body)
 
     return app
 
