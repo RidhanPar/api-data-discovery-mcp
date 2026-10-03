@@ -21,12 +21,14 @@ import contextvars
 import json
 import logging
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 
+from ..observability import Metrics, request_id_var
 from ..security.jwt import principal_from_access_token
 from ..security.policy import TOOL_SCOPES, asset_scopes, tool_decision
 from ..security.ratelimit import RateLimiter
@@ -83,6 +85,16 @@ def _error_result(code: str, message: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": json.dumps(payload)}], "isError": True, "resultType": "complete"}
 
 
+def _zero_results(tool: str, result: Any) -> bool | None:
+    """For search_catalog: did the call return no assets? None for other tools."""
+    if tool != "search_catalog":
+        return None
+    data = result.get("structuredContent") if isinstance(result, dict) else getattr(result, "structured_content", None)
+    if not isinstance(data, dict) or "results" not in data:
+        return None
+    return not data["results"]
+
+
 def _outcome(result: Any) -> tuple[str, str | None]:
     """Map a tools/call result (wire-format dict, or a result model) to an audit decision."""
     if isinstance(result, dict):
@@ -110,8 +122,10 @@ class Guard:
         limiter: RateLimiter,
         dev_caller: Caller | None,
         clock: Callable[[], float] = time.monotonic,
+        metrics: Metrics | None = None,
     ) -> None:
         self.audit = audit
+        self.metrics = metrics or Metrics()
         self.limiter = limiter
         self.dev_caller = dev_caller  # None when auth is enabled: no token, no access
         self.clock = clock
@@ -124,11 +138,41 @@ class Guard:
         tool = str(params.get("name", ""))
         args = params.get("arguments") or {}
         args = args if isinstance(args, dict) else {}
+        mcp_request_id = str(getattr(ctx, "request_id", "") or "")  # JSON-RPC id: unique per session only
+        request_id = uuid.uuid4().hex  # per tool call; sent to the catalog as X-Request-ID
+        rid_token = request_id_var.set(request_id)
+        try:
+            return await self._guarded(ctx, call_next, tool, args, mcp_request_id, request_id)
+        finally:
+            request_id_var.reset(rid_token)
+
+    async def _guarded(
+        self,
+        ctx: Any,
+        call_next: Callable[[Any], Awaitable[Any]],
+        tool: str,
+        args: dict[str, Any],
+        mcp_request_id: str,
+        request_id: str,
+    ) -> Any:
         caller = caller_from_token(self.dev_caller)
-        request_id = str(getattr(ctx, "request_id", "") or "")
         started = self.clock()
 
-        async def record(decision: str, reason: str | None) -> None:
+        async def record(decision: str, reason: str | None, zero_results: bool | None = None) -> None:
+            ms = round((self.clock() - started) * 1000, 1)
+            self.metrics.observe(f"tool:{tool or 'unknown'}", ms, error=decision == "error", zero_results=zero_results)
+            log.info(
+                "tool_call",
+                extra={
+                    "event": "tool_call",
+                    "tool": tool or "unknown",
+                    "decision": decision,
+                    "latency_ms": ms,
+                    "zero_results": zero_results,
+                    "client_id": caller.client_id if caller else None,
+                    "mcp_request_id": mcp_request_id[:80] or None,
+                },
+            )
             event = {
                 "actor": caller.subject if caller else "anonymous",
                 "action": f"tool:{tool}"[:80] if tool else "tool:unknown",
@@ -138,7 +182,7 @@ class Guard:
                 "request_id": request_id[:80] or None,
                 "details": {
                     "client_id": caller.client_id if caller else None,
-                    "latency_ms": round((self.clock() - started) * 1000, 1),
+                    "latency_ms": ms,
                 },
             }
             try:
@@ -189,5 +233,5 @@ class Guard:
         finally:
             current_caller.reset(token)
         outcome, reason = _outcome(result)
-        await record(outcome, reason)
+        await record(outcome, reason, _zero_results(tool, result) if outcome == "allowed" else None)
         return result

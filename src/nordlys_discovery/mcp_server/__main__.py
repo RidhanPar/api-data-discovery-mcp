@@ -12,12 +12,12 @@ with its own client credentials.
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 
 from mcp.server.auth.settings import AuthSettings
 
 from ..config import get_settings
+from ..observability import configure_logging
 from ..security.jwt import JwtValidator, McpTokenVerifier
 from ..security.ratelimit import RateLimiter
 from .catalog_client import CatalogClient, ClientCredentialsTokens
@@ -33,7 +33,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=settings.mcp_port)
     args = parser.parse_args()
     # stdio carries the protocol on stdout, so logs must go to stderr.
-    logging.basicConfig(level=settings.log_level, stream=sys.stderr)
+    configure_logging("mcp", settings.log_level, json_logs=settings.log_json, stream=sys.stderr)
 
     token_provider = None
     verifier = None

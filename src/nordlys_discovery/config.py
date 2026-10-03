@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     access_request_webhook_secret: SecretStr | None = None
 
     log_level: str = "INFO"
+    log_json: bool = True  # one JSON object per line; false = plain text for local reading
 
 
 @lru_cache

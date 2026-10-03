@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from ..config import Settings, get_settings
 from ..llm import LLMError, LLMProvider, LLMUnavailable, create_llm
 from ..mcp_server.catalog_client import ClientCredentialsTokens
+from ..observability import configure_logging, request_id_var
 from ..security.jwt import JwtValidator
 from ..security.ratelimit import RateLimiter
 from ..service.auth import CallContext, CatalogAuth
@@ -55,11 +56,15 @@ def _ctx(request: Request) -> CallContext:
 Ctx = Annotated[CallContext, Depends(_ctx)]
 
 
-def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, *, llm: LLMProvider | None = None, configure_logs: bool = False
+) -> FastAPI:
     settings = settings or get_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if configure_logs:
+            configure_logging("agent", settings.log_level, json_logs=settings.log_json)
         app.state.llm = llm
         app.state.llm_error = None
         if llm is None:
@@ -90,10 +95,14 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
 
     @app.middleware("http")
     async def request_id(request: Request, call_next: Any) -> Any:
-        request.state.request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request.state.request_id
-        return response
+        request.state.request_id = (request.headers.get("X-Request-ID") or uuid.uuid4().hex)[:80]
+        token = request_id_var.set(request.state.request_id)
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request.state.request_id
+            return response
+        finally:
+            request_id_var.reset(token)
 
     @app.get("/health/live")
     def live() -> dict[str, str]:
@@ -135,18 +144,23 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
         ):
             answer = await ask(llm_, McpToolSource(client), body.question, max_steps=settings.agent_max_steps)
         log.info(
-            "ask user=%s model=%s stop=%s tools=%d tokens=%d/%d ms=%.0f",
-            ctx.user,
-            answer.model,
-            answer.stop,
-            len(answer.tool_calls),
-            answer.input_tokens,
-            answer.output_tokens,
-            answer.latency_ms,
+            "agent_answer",
+            extra={
+                "event": "agent_answer",
+                "user": ctx.user,
+                "model": answer.model,
+                "stop": answer.stop,
+                "refused": answer.refused,
+                "tool_calls": len(answer.tool_calls),
+                "ungrounded_citations": len(answer.ungrounded_citations),
+                "input_tokens": answer.input_tokens,
+                "output_tokens": answer.output_tokens,
+                "latency_ms": answer.latency_ms,
+            },
         )
         return answer
 
     return app
 
 
-app = create_app()
+app = create_app(configure_logs=True)

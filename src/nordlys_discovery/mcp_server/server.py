@@ -32,6 +32,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from ..access.policy import AccessDecision, AccessRequirements, decide
+from ..observability import Metrics
 from ..security.ratelimit import RateLimiter
 from ..service.access import AccessRequestOut
 from ..service.schemas import ApiDetails, DataProductDetails, Deprecation, EndpointSchema, VersionComparison
@@ -136,6 +137,7 @@ def build_server(
     auth_settings: AuthSettings | None = None,
     limiter: RateLimiter | None = None,
     today: Callable[[], date] = date.today,
+    metrics: Metrics | None = None,
 ) -> MCPServer[Any]:
     """Build the server.
 
@@ -143,10 +145,12 @@ def build_server(
     the caller comes from its claims. Without them (local dev, tests) every call runs as
     `dev_caller`, which still goes through the same scope policy, rate limit and audit.
     """
+    metrics = metrics or Metrics()
     guard = Guard(
         audit=catalog.write_audit,
         limiter=limiter or RateLimiter(rate_per_minute=60, burst=20),
         dev_caller=None if token_verifier else dev_caller,
+        metrics=metrics,
     )
 
     def caller_now() -> Caller:
@@ -447,6 +451,11 @@ def build_server(
     @mcp.custom_route("/health/live", methods=["GET"])  # type: ignore[untyped-decorator]
     async def live(_: Request) -> JSONResponse:
         return JSONResponse({"status": "ok"})
+
+    @mcp.custom_route("/metrics", methods=["GET"])  # type: ignore[untyped-decorator]
+    async def metrics_route(_: Request) -> JSONResponse:
+        """Per-tool calls, error rate, p50/p95 latency, search zero-result rate (this process)."""
+        return JSONResponse(metrics.snapshot())
 
     @mcp.custom_route("/health/ready", methods=["GET"])  # type: ignore[untyped-decorator]
     async def ready(_: Request) -> JSONResponse:

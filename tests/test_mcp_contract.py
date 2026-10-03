@@ -298,3 +298,19 @@ async def test_upstream_contract_violation_is_reported_not_crashed() -> None:
     async with Client(server) as client:
         e = await _err(client, "get_api_details", {"api_id": "claims-api", "version": 2})
     assert e["code"] == "upstream_contract_error"
+
+
+async def test_tool_metrics_record_latency_and_zero_results(catalog_app: FastAPI) -> None:
+    from nordlys_discovery.observability import Metrics
+
+    metrics = Metrics()
+    async with catalog_app.router.lifespan_context(catalog_app):
+        catalog = CatalogClient("http://catalog", transport=httpx.ASGITransport(app=catalog_app), retries=0)
+        server = build_server(catalog, dev_caller=Caller("dev.user@nordlys.example"), metrics=metrics)
+        async with Client(server) as client:
+            await _ok(client, "search_catalog", {"query": "open claims"})
+            await _ok(client, "search_catalog", {"query": "claims", "country": "LT", "domain": "fraud", "version": 9})
+            await _err(client, "get_api_details", {"api_id": "no-such-api", "version": 1})
+    snap = metrics.snapshot()["series"]
+    assert snap["tool:search_catalog"]["calls"] == 2 and snap["tool:search_catalog"]["zero_result_rate"] == 0.5
+    assert snap["tool:get_api_details"]["error_rate"] == 0.0  # not_found is a client outcome, not a server error

@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 
+from ..observability import request_id_var
 from .guard import current_caller
 
 TokenProvider = Callable[[], Awaitable[str]]
@@ -75,6 +76,7 @@ class CatalogClient:
     async def _request(
         self, method: str, path: str, *, params: Any = None, json: Any = None, request_id: str | None = None
     ) -> Any:
+        request_id = request_id or request_id_var.get()  # correlates MCP and catalog logs
         headers = {"X-Request-ID": request_id} if request_id else {}
         caller = current_caller.get()
         if caller is not None:

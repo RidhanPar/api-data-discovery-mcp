@@ -29,6 +29,7 @@ from ..config import Settings, get_settings
 from ..db.models import Chunk
 from ..db.session import make_engine
 from ..embeddings import EmbeddingError, EmbeddingProvider, create_provider
+from ..observability import Metrics, configure_logging, request_id_var
 from ..search.hybrid import SearchParams, search
 from ..search.models import AssetType, Country, Domain, SearchFilters, SearchMode, SearchQuery, SearchResponse
 from ..security.policy import sample_rows_decision
@@ -77,12 +78,16 @@ def create_app(
     engine: Engine | None = None,
     embedder: EmbeddingProvider | None = None,
     auth: CatalogAuth | None = None,
+    configure_logs: bool = False,
 ) -> FastAPI:
     settings = settings or get_settings()
     notifier = AccessRequestNotifier.from_settings(settings)
+    metrics = Metrics()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if configure_logs:  # after uvicorn configured its own logging
+            configure_logging("catalog", settings.log_level, json_logs=settings.log_json)
         app.state.engine = engine or make_engine(
             settings.database_url,
             pool_size=settings.db_pool_size,
@@ -120,13 +125,33 @@ def create_app(
 
     @app.middleware("http")
     async def request_id(request: Request, call_next: Any) -> Any:
-        rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        rid = (request.headers.get("X-Request-ID") or uuid.uuid4().hex)[:80]
         request.state.request_id = rid
+        token = request_id_var.set(rid)
         started = time.perf_counter()
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = rid
-        response.headers["Server-Timing"] = f"app;dur={(time.perf_counter() - started) * 1000:.1f}"
-        return response
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            response.headers["X-Request-ID"] = rid
+            response.headers["Server-Timing"] = f"app;dur={(time.perf_counter() - started) * 1000:.1f}"
+            return response
+        finally:
+            ms = round((time.perf_counter() - started) * 1000, 1)
+            route = getattr(request.scope.get("route"), "path", "unmatched")
+            if not route.startswith("/health") and route != "/metrics":
+                metrics.observe(f"{request.method} {route}", ms, error=status >= 500)
+                log.info(
+                    "http_request",
+                    extra={
+                        "event": "http_request",
+                        "method": request.method,
+                        "route": route,
+                        "status": status,
+                        "latency_ms": ms,
+                    },
+                )
+            request_id_var.reset(token)
 
     def problem(request: Request, status: int, title: str, detail: str | None = None) -> JSONResponse:
         body = S.Problem(
@@ -157,6 +182,11 @@ def create_app(
         return problem(request, 500, "Internal error", "Quote the request id when reporting this.")
 
     # ------------------------------------------------------------------ health
+
+    @app.get("/metrics", tags=["health"])
+    def metrics_view() -> dict[str, Any]:
+        """Per-route calls, server error rate and p50/p95 latency (this process)."""
+        return metrics.snapshot()
 
     @app.get("/health/live", tags=["health"])
     def live() -> dict[str, str]:
@@ -439,4 +469,4 @@ def create_app(
     return app
 
 
-app = create_app()
+app = create_app(configure_logs=True)
