@@ -8,6 +8,21 @@ dependencies = [
     "pydantic>=2.8",
     "pyyaml>=6.0",
     "openapi-spec-validator>=0.7.1",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0.30",
+    "psycopg[binary,pool]>=3.2",
+    "pgvector>=0.3",
+    "alembic>=1.13",
+    "pydantic-settings>=2.4",
+    "onnxruntime>=1.18",
+    "tokenizers>=0.19",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+azure = [
+    "openai>=1.40",
 ]
 
 [dependency-groups]
@@ -16,6 +31,8 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "types-pyyaml>=6.0",
+    "testcontainers[postgres]>=4.8",
+    "httpx>=0.27",
 ]
 
 [build-system]
@@ -39,9 +56,15 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+plugins = ["pydantic.mypy"]
 files = ["src", "scripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["integration: needs Postgres with pgvector (testcontainers or NORDLYS_TEST_DATABASE_URL)"]
 pythonpath = ["."]
+
+[[tool.mypy.overrides]]
+module = ["onnxruntime.*", "testcontainers.*"]
+ignore_missing_imports = true
