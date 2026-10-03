@@ -18,8 +18,12 @@ run them in the build environment. If they don't work for you, open an issue.
 ## Python client (scripted demo)
 
 ```bash
-make mcp                                   # terminal 1 (after make serve in another terminal)
-uv run python scripts/mcp_client_demo.py   # terminal 2
+make up && make mcp-demo        # full stack with Keycloak: signs in as a demo user
+
+# or without an identity provider:
+make serve                      # terminal 1
+make mcp                        # terminal 2
+uv run python scripts/mcp_client_demo.py --no-auth   # terminal 3
 ```
 
 It runs: search → API details → endpoint schema → check_access → request_access. It also

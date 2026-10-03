@@ -20,8 +20,9 @@ on-behalf-of) in `docs/azure.md`.
 
 ## Consequences
 
-+ Real OAuth in every test and demo, with no cloud tenant or licence needed; security
-  integration tests run against an actual Keycloak.
++ Real OAuth in every demo, with no cloud tenant or licence needed: the end-to-end
+  demo scripts run against an actual Keycloak, and the realm is the same file in
+  docker-compose and Azure. (Automated tests sign tokens with a test key, to stay fast.)
 + Moving to Entra ID is configuration plus claim mapping (`scp` vs `scope`, app roles),
   not a rewrite.
 - Two identity setups to understand. Keycloak in Azure is one more container to patch;

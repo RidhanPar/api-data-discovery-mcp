@@ -1,6 +1,10 @@
 """MCP client demo: answer "Which API gives me open claims for Norway, and how do I get access?"
 
-    uv run python scripts/mcp_client_demo.py [--url http://localhost:8001/mcp]
+    uv run python scripts/mcp_client_demo.py [--url http://localhost:8001/mcp] [--user alice] [--no-auth]
+
+Against the docker-compose stack (`make up`) it signs in as a demo user through Keycloak
+(OAuth password grant on the public dev client, local demo only). Use --no-auth against
+`make mcp`, which runs without an identity provider.
 
 A scripted walk through the tools over Streamable HTTP, with no LLM involved. It shows
 exactly what an AI assistant sees when it uses the server. Phase 5 replaces the script
@@ -14,7 +18,10 @@ import asyncio
 import json
 from typing import Any
 
+import httpx
+import httpx2
 from mcp import Client
+from mcp.client.streamable_http import streamable_http_client
 
 from nordlys_discovery.mcp_server.server import parse_tool_error
 
@@ -32,8 +39,25 @@ async def call(client: Client, tool: str, args: dict[str, Any]) -> Any:
     return result.structured_content
 
 
-async def main(url: str) -> None:
-    async with Client(url) as client:
+TOKEN_URL = "http://localhost:8080/realms/nordlys/protocol/openid-connect/token"
+
+
+def user_token(username: str, password: str) -> str:
+    r = httpx.post(
+        TOKEN_URL,
+        data={"grant_type": "password", "client_id": "nordlys-dev-cli", "username": username, "password": password},
+        timeout=10,
+    )
+    r.raise_for_status()
+    return str(r.json()["access_token"])
+
+
+async def main(url: str, token: str | None) -> None:
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    async with (
+        httpx2.AsyncClient(headers=headers, timeout=30) as http,
+        Client(streamable_http_client(url, http_client=http)) as client,
+    ):
         tools = await client.list_tools()
         print("Tools:", ", ".join(t.name for t in tools.tools))
         templates = await client.list_resource_templates()
@@ -122,4 +146,8 @@ async def main(url: str) -> None:
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--url", default="http://localhost:8001/mcp")
-    asyncio.run(main(p.parse_args().url))
+    p.add_argument("--user", default="dpo", help="demo user (alice, bob, dpo)")
+    p.add_argument("--password", default=None, help="default: <user>-local, the local realm's demo password")
+    p.add_argument("--no-auth", action="store_true")
+    a = p.parse_args()
+    asyncio.run(main(a.url, None if a.no_auth else user_token(a.user, a.password or f"{a.user}-local")))
