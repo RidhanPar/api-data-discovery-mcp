@@ -87,7 +87,7 @@ def test_grant_happens_only_after_recorded_human_approval() -> None:
             for e in outputs:
                 parents.setdefault(e["node"], set()).add(f"{src}#{idx}")
     # Walk upstream from the grant; every path must pass the true-branch of "Approved?".
-    chain = ["Grant role to requester", "Get role", "Ensure role exists", "Find requester in IdP"]
+    chain = ["Grant role to requester", "Get role", "Find requester in IdP"]
     for child, parent in itertools.pairwise(chain):
         assert parents[child] == {f"{parent}#0"}
     assert parents["Find requester in IdP"] == {"Approved?#0"}

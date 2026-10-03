@@ -603,53 +603,12 @@
       "onError": "continueErrorOutput"
     },
     {
-      "id": "d91a2b7b-19a8-5494-86ce-912334f5f610",
-      "name": "Ensure role exists",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1200,
-        800
-      ],
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $env.NORDLYS_KEYCLOAK_ADMIN_URL }}/roles",
-        "options": {
-          "timeout": 10000,
-          "response": {
-            "response": {
-              "neverError": true,
-              "fullResponse": true
-            }
-          }
-        },
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $('Fresh service token').first().json.access_token }}"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ { \"name\": $(\"Final decision\").first().json.request.requested_scope, \"description\": \"Granted via approved access requests\" } }}"
-      },
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000,
-      "notes": "[system] 201 created or 409 already exists - both fine",
-      "notesInFlow": true,
-      "onError": "continueErrorOutput"
-    },
-    {
       "id": "48203169-689f-5df4-86f0-80c3916eaf9a",
       "name": "Get role",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1440,
+        1200,
         800
       ],
       "parameters": {
@@ -671,7 +630,7 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
-      "notes": "[system]",
+      "notes": "[system] Roles are defined in the realm-as-code; a missing role goes to the error branch",
       "notesInFlow": true,
       "onError": "continueErrorOutput"
     },
@@ -681,7 +640,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1680,
+        1440,
         800
       ],
       "parameters": {
@@ -716,7 +675,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1920,
+        1680,
         800
       ],
       "parameters": {
@@ -751,7 +710,7 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        2160,
+        1920,
         800
       ],
       "parameters": {
@@ -1159,24 +1118,6 @@
       ]
     },
     "Find requester in IdP": {
-      "main": [
-        [
-          {
-            "node": "Ensure role exists",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Describe failure",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Ensure role exists": {
       "main": [
         [
           {

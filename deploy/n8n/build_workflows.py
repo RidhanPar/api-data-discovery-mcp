@@ -483,28 +483,17 @@ return [{ json: { decision: approved ? 'approved' : 'rejected', decided_by, note
         headers=[("Authorization", "=Bearer {{ $('Fresh service token').first().json.access_token }}")],
         note="[system] Keycloak Admin API (Entra: Microsoft Graph)",
     )
-    ensure_role = f.http(
-        "Ensure role exists",
-        p(23, 0),
-        method="POST",
-        url="={{ $env.NORDLYS_KEYCLOAK_ADMIN_URL }}/roles",
-        headers=[("Authorization", "=Bearer {{ $('Fresh service token').first().json.access_token }}")],
-        json_body='={{ { "name": $("Final decision").first().json.request.requested_scope, '
-        '"description": "Granted via approved access requests" } }}',
-        never_error=True,
-        note="[system] 201 created or 409 already exists - both fine",
-    )
     get_role = f.http(
         "Get role",
-        p(24, 0),
+        p(23, 0),
         method="GET",
         url="={{ $env.NORDLYS_KEYCLOAK_ADMIN_URL }}/roles/{{ encodeURIComponent($('Final decision').first().json.request.requested_scope) }}",
         headers=[("Authorization", "=Bearer {{ $('Fresh service token').first().json.access_token }}")],
-        note="[system]",
+        note="[system] Roles are defined in the realm-as-code; a missing role goes to the error branch",
     )
     grant = f.http(
         "Grant role to requester",
-        p(25, 0),
+        p(24, 0),
         method="POST",
         url="={{ $env.NORDLYS_KEYCLOAK_ADMIN_URL }}/users/{{ $('Find requester in IdP').first().json.id }}/role-mappings/realm",
         headers=[("Authorization", "=Bearer {{ $('Fresh service token').first().json.access_token }}")],
@@ -513,7 +502,7 @@ return [{ json: { decision: approved ? 'approved' : 'rejected', decided_by, note
     )
     audit_grant = f.http(
         "Audit: access granted",
-        p(26, 0),
+        p(25, 0),
         method="POST",
         url="={{ $env.NORDLYS_CATALOG_URL }}/v1/audit-events",
         headers=[("Authorization", "=Bearer {{ $('Fresh service token').first().json.access_token }}")],
@@ -525,7 +514,7 @@ return [{ json: { decision: approved ? 'approved' : 'rejected', decided_by, note
     )
     notify = f.email(
         "Notify requester",
-        p(27, 1),
+        p(26, 1),
         to="={{ $('Final decision').first().json.request.requester_email }}",
         subject="=Your access request for {{ $('Final decision').first().json.request.requested_scope }} "
         "was {{ $('Final decision').first().json.decision }}",
@@ -590,10 +579,8 @@ return [{ json: { request_id, what: String(what).slice(0, 500), execution: $exec
     f.link(record, err, 1)
     f.link(approved, find_user, 0)
     f.link(approved, notify, 1)
-    f.link(find_user, ensure_role, 0)
+    f.link(find_user, get_role, 0)
     f.link(find_user, err, 1)
-    f.link(ensure_role, get_role, 0)
-    f.link(ensure_role, err, 1)
     f.link(get_role, grant, 0)
     f.link(get_role, err, 1)
     f.link(grant, audit_grant, 0)
@@ -628,11 +615,10 @@ return [{ json: { request_id, what: String(what).slice(0, 500), execution: $exec
             "Record decision in catalog": (2, 4),
             "Approved?": (3, 4),
             "Find requester in IdP": (4, 4),
-            "Ensure role exists": (5, 4),
-            "Get role": (6, 4),
-            "Grant role to requester": (7, 4),
-            "Audit: access granted": (8, 4),
-            "Notify requester": (9, 4),
+            "Get role": (5, 4),
+            "Grant role to requester": (6, 4),
+            "Audit: access granted": (7, 4),
+            "Notify requester": (8, 4),
             # lane 5: error branch
             "Describe failure": (8, 5),
             "Alert platform ops": (9, 5),

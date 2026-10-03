@@ -48,6 +48,7 @@ lint:
 check: lint
 	uv run python -m scripts.catalog_gen --check
 	uv run python deploy/n8n/build_workflows.py --check
+	uv run python deploy/keycloak/sync_roles.py --check
 	uv run pytest
 
 image:            ## build the app image (works behind a TLS-intercepting proxy: CA passed as a build secret)

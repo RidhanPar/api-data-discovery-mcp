@@ -342,8 +342,7 @@
         "realm-management": [
           "view-users",
           "manage-users",
-          "view-realm",
-          "manage-realm"
+          "view-realm"
         ]
       }
     },
@@ -364,6 +363,191 @@
     }
   ],
   "roles": {
-    "realm": []
+    "realm": [
+      {
+        "name": "billing.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "broker.commission.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "broker.portfolio.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "claims.fnol",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "claims.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "claims.read.self",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "claims.search",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "claims.write",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "consent.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "consent.write",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "customer.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "customer.write",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.broker-commission.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.broker-performance.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.claims-history.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.claims-open-cases.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.consents.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.customer-360.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.document-metrics.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.fraud-scores.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.gwp.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.health-claims.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.payments.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.policy-portfolio.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.quote-funnel.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.telematics.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "dataproduct.weather-exposure.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "documents.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "documents.write",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "fraud.referral.create",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "fraud.referral.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "fraud.score.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "idv.session",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "motor.greencard",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "motor.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "partner.submit",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "payment-methods.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "payment-methods.write",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "payout.approve",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "payout.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "payout.request",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "policy.endorse",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "policy.read",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "policy.write",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "quote.bind",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      },
+      {
+        "name": "quote.create",
+        "description": "Asset access, granted only via an approved access request (workflow A)"
+      }
+    ]
   }
 }

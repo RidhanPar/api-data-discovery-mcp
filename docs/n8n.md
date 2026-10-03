@@ -69,9 +69,9 @@ and POSTs a signed event (`X-Nordlys-Signature: sha256=HMAC(secret, ts.body)`) t
 | 14 | Fresh service token | system | The first token expired while humans were deciding. |
 | 15 | Record decision in catalog | system | `POST /v1/access-requests/{id}/decision` on behalf of the approver. The catalog enforces `access.approve` and four-eyes, and audits the decision. |
 | 16 | Approved? | rule | Only the approved branch continues to the grant. |
-| 17–20 | Find requester in IdP → Ensure role exists → Get role → Grant role to requester | system | Keycloak Admin API: assigns the realm role named after the scope (e.g. `claims.search`). |
-| 21 | Audit: access granted | system | Append-only audit event `access_grant.applied`. |
-| 22 | Notify requester | system | Approved, rejected or expired, with the reason. |
+| 17–19 | Find requester in IdP → Get role → Grant role to requester | system | Keycloak Admin API: assigns the realm role named after the scope (e.g. `claims.search`). The roles are defined in the realm-as-code (one per grantable catalog scope, kept in sync by `deploy/keycloak/sync_roles.py`), so n8n's service account needs only `manage-users` and `view-realm`: it can assign existing roles but cannot create roles or change realm settings. A scope without a role goes to the error branch. |
+| 20 | Audit: access granted | system | Append-only audit event `access_grant.applied`. |
+| 21 | Notify requester | system | Approved, rejected or expired, with the reason. |
 | — | Describe failure → Alert platform ops | rule / human | Every HTTP node's error output and every invalid or unroutable case ends here. The request is untouched. |
 | — | Workflow setting `errorWorkflow` | — | Anything not routed above triggers workflow **Z · Error handler**, which alerts ops. |
 
