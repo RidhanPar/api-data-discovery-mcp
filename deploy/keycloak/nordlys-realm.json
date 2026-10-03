@@ -191,6 +191,33 @@
           }
         }
       ]
+    },
+    {
+      "name": "catalog.publish",
+      "description": "Publish newly registered APIs (Workflow B)",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "aud-nordlys-agent",
+      "description": "Binds tokens to the agent service.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "nordlys-agent",
+            "access.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "clients": [
@@ -245,7 +272,9 @@
         "aud-nordlys-catalog",
         "catalog.internal",
         "access.approve",
-        "roles"
+        "roles",
+        "catalog.publish",
+        "aud-nordlys-agent"
       ]
     },
     {

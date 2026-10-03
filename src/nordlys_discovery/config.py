@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 EmbeddingProviderName = Literal["onnx-local", "sentence-transformers", "azure-openai", "hashing"]
@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     db_statement_timeout_ms: int = 5000
 
     catalog_dir: Path = Path(__file__).resolve().parents[2] / "catalog"
+    # APIs published through Workflow B; ingested together with catalog_dir.
+    registrations_dir: Path | None = None
 
     # Embeddings. The vector column is fixed at `embedding_dim`; every provider must
     # produce vectors of this size (Azure text-embedding-3-* supports a `dimensions` arg).
@@ -38,6 +40,18 @@ class Settings(BaseSettings):
     azure_openai_api_key: SecretStr | None = None
     azure_openai_api_version: str = "2024-10-21"
     azure_openai_embedding_deployment: str = "text-embedding-3-small"
+
+    # LLM (agent, registration classifier, LLM judge). "none" = no generative steps;
+    # workflows then route everything to human review.
+    llm_provider: Literal["azure-openai", "anthropic", "openai", "none"] = "none"
+    llm_timeout_s: float = 60.0
+    azure_openai_chat_deployment: str = "gpt-4.1-mini"
+    anthropic_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("NORDLYS_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")
+    )
+    anthropic_model: str = "claude-sonnet-5-5"
+    openai_api_key: SecretStr | None = None
+    openai_model: str = "gpt-4.1-mini"
 
     # Search.
     search_candidates: int = Field(50, description="Hits taken from each retriever before fusion.")
@@ -62,6 +76,7 @@ class Settings(BaseSettings):
     oidc_jwks_url: str | None = None  # internal URL when the issuer's public URL is not reachable
     catalog_audience: str = "nordlys-catalog"
     mcp_audience: str = "nordlys-mcp"
+    agent_audience: str = "nordlys-agent"
     mcp_public_url: str = "http://localhost:8001/mcp"
     # Services allowed to call the catalog on behalf of an end user (X-On-Behalf-Of-* headers).
     trusted_service_clients: list[str] = Field(default_factory=lambda: ["nordlys-mcp-server", "nordlys-n8n"])

@@ -72,7 +72,9 @@ def extract_metadata(doc: dict[str, Any], path: Path) -> ApiMetadata:
     dir_domain = path.parent.name
     prov: dict[str, str] = {}
 
-    if ext:
+    ext = ext if isinstance(ext, dict) else {}
+    complete = all(k in ext for k in ("api-id", "domain", "owner-team"))
+    if complete:
         prov.update(dict.fromkeys(("api_id", "domain", "owner_team", "countries", "lifecycle"), "x-nordlys"))
         lifecycle = ext.get("lifecycle", {})
         sunset_raw = lifecycle.get("sunset")
@@ -91,31 +93,37 @@ def extract_metadata(doc: dict[str, Any], path: Path) -> ApiMetadata:
             provenance=prov,
         )
 
-    # Legacy or missing metadata.
-    if "x-domain" in info:
+    # Partial standard block, legacy extensions, or nothing: resolve each field on its own.
+    if "domain" in ext:
+        domain, prov["domain"] = str(ext["domain"]).lower(), "x-nordlys"
+    elif "x-domain" in info:
         domain, prov["domain"] = str(info["x-domain"]).lower(), "legacy-extension"
     elif dir_domain in KNOWN_DOMAINS:
         domain, prov["domain"] = dir_domain, "inferred:catalog-folder"
     else:
         domain, prov["domain"] = "unknown", "missing"
 
-    if "x-owner" in info:
+    if "owner-team" in ext:
+        owner, prov["owner_team"] = str(ext["owner-team"]), "x-nordlys"
+    elif "x-owner" in info:
         owner, prov["owner_team"] = str(info["x-owner"]), "legacy-extension"
     elif "x-team" in info:
         owner, prov["owner_team"] = str(info["x-team"]), "legacy-extension"
     else:
         owner, prov["owner_team"] = "unknown", "missing"
 
-    if "x-countries" in info:
+    if ext.get("countries"):
+        countries, prov["countries"] = tuple(str(c).upper() for c in ext["countries"]), "x-nordlys"
+    elif "x-countries" in info:
         countries, prov["countries"] = _countries_from_string(str(info["x-countries"])), "legacy-extension"
     else:
         countries = _infer_countries(doc)
         prov["countries"] = "inferred:server-url" if countries else "missing"
 
-    prov["api_id"] = "inferred:file-name"
-    prov["lifecycle"] = "missing"
+    prov["api_id"] = "x-nordlys" if "api-id" in ext else "inferred:file-name"
+    prov["lifecycle"] = "x-nordlys" if "lifecycle" in ext else "missing"
     return ApiMetadata(
-        api_id=file_api_id or _slug(info.get("title", "unknown")),
+        api_id=str(ext.get("api-id") or file_api_id or _slug(info.get("title", "unknown"))),
         title=str(info.get("title", file_api_id)),
         version=version,
         major_version=major,

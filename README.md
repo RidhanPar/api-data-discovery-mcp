@@ -14,7 +14,8 @@ An AI-powered discovery platform that makes the APIs and Data Products of **Nord
 | 1 | Synthetic catalog: 25 OpenAPI 3.1 specs and 15 data contracts | ✅ done |
 | 2 | Catalog service: FastAPI, Postgres/pgvector, idempotent ingestion, hybrid search | ✅ done |
 | 3 | MCP server (official SDK, Streamable HTTP + stdio): 8 tools, 3 resources, 2 prompts, human-approved access requests | ✅ done |
-| 4 | Security: OAuth 2.1/OIDC (Keycloak), policy as code, audit, injection defence | ⏳ |
+| 4 | Security: OAuth 2.1/OIDC (Keycloak), policy as code, append-only audit, injection defence | ✅ done ([docs/security.md](docs/security.md)) |
+| 4b | n8n workflows: A access approval (human-in-the-loop, grant in IdP), B API registration (agent + human review) | ✅ done ([docs/n8n.md](docs/n8n.md)) |
 | 5 | Discovery agent and evaluation (search quality is measured here, not before) | ⏳ |
 | 6 | Docker, Azure (Container Apps, Postgres, Key Vault), observability | ⏳ |
 | 7 | CI, docs, ADRs, demo | ⏳ |

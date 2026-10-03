@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import Engine, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -31,7 +32,7 @@ from ..embeddings import EmbeddingError, EmbeddingProvider, create_provider
 from ..search.hybrid import SearchParams, search
 from ..search.models import AssetType, Country, Domain, SearchFilters, SearchMode, SearchQuery, SearchResponse
 from ..security.policy import sample_rows_decision
-from . import access, audit
+from . import access, audit, registration
 from . import repository as repo
 from . import schemas as S
 from .auth import CallContext, CatalogAuth
@@ -55,6 +56,10 @@ def db(request: Request) -> Iterator[Session]:
 
 
 DB = Annotated[Session, Depends(db)]
+
+
+class RegistrationIn(BaseModel):
+    spec: str = Field(min_length=10, max_length=registration.MAX_SPEC_BYTES)
 
 
 def call_context(request: Request) -> CallContext:
@@ -390,6 +395,41 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
     ) -> list[audit.AuditEventOut]:
         return audit.query(session, actor=actor, action=action, request_id=request_id, limit=limit)
+
+    # ------------------------------------------------------------------ registrations (Workflow B)
+
+    @app.exception_handler(registration.RegistrationError)
+    async def _registration(request: Request, exc: registration.RegistrationError) -> JSONResponse:
+        return problem(request, 422, "Registration rejected", str(exc))
+
+    @v1.post("/v1/registrations/validate", response_model=registration.RegistrationCheck, tags=["registrations"])
+    def validate_registration(request: Request, session: DB, body: RegistrationIn) -> registration.RegistrationCheck:
+        """Deterministic checks only: validity, metadata, doc coverage, injection, duplicates."""
+        return registration.check(session, request.app.state.embedder, body.spec)
+
+    @v1.post("/v1/registrations", response_model=registration.PublishResult, status_code=201, tags=["registrations"])
+    def publish_registration(
+        request: Request, session: DB, ctx: Ctx, body: registration.PublishRequest
+    ) -> registration.PublishResult:
+        if not ctx.has("catalog.publish"):
+            raise HTTPException(403, "Publishing requires catalog.publish")
+        if request.app.state.embedder is None or settings.registrations_dir is None:
+            raise HTTPException(503, "Publishing needs an embedding model and NORDLYS_REGISTRATIONS_DIR")
+        out = registration.publish(
+            session, request.app.state.embedder, body, settings.catalog_dir, settings.registrations_dir
+        )
+        audit.write(
+            session,
+            source=ctx.service,
+            actor=body.reviewed_by or body.submitted_by,
+            action="api.registered",
+            resource=f"api:{out.api_id}:v{out.major_version}",
+            decision="approved",
+            reason=f"{body.decision}; owner {body.owner_team}; domain {body.domain}",
+            request_id=request.state.request_id,
+            submitted_by=body.submitted_by,
+        )
+        return out
 
     app.include_router(v1)
     return app

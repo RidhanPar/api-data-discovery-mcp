@@ -1,0 +1,57 @@
+# Test fixture: a well-documented NEW API submitted through Workflow B.
+openapi: 3.1.0
+info:
+  title: Vet Clinic Directory API
+  version: 1.0.0
+  description: |
+    Directory of veterinary clinics that have a direct-billing agreement with Nordlys for
+    pet insurance claims. Lets the pet-claims app show partner clinics near the customer
+    and tells claims handlers whether a clinic bills Nordlys directly.
+  x-nordlys:
+    countries: [SE, "NO", FI]
+servers:
+  - url: https://api.nordlys.example/pet/vet-clinics/v1
+paths:
+  /clinics:
+    get:
+      operationId: searchClinics
+      summary: Search partner vet clinics
+      description: Filter by market, postal code prefix and whether the clinic bills Nordlys directly.
+      parameters:
+        - {name: country, in: query, description: "Market (SE, NO or FI).", schema: {type: string, enum: [SE, "NO", FI]}}
+        - {name: postalCodePrefix, in: query, description: First digits of the postal code., schema: {type: string}}
+        - {name: directBilling, in: query, description: Only clinics with a direct-billing agreement., schema: {type: boolean}}
+      responses:
+        "200":
+          description: Matching clinics
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/Clinic"}
+  /clinics/{clinicId}:
+    get:
+      operationId: getClinic
+      summary: Get one clinic
+      description: Full details of a partner clinic, including opening hours and agreement status.
+      parameters:
+        - {name: clinicId, in: path, required: true, description: Clinic id., schema: {type: string}}
+      responses:
+        "200":
+          description: The clinic
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Clinic"}
+components:
+  schemas:
+    Clinic:
+      type: object
+      description: A veterinary clinic in the partner network.
+      required: [clinicId, name, country]
+      properties:
+        clinicId: {type: string, description: Stable clinic id.}
+        name: {type: string, description: Clinic name.}
+        country: {type: string, description: Market.}
+        postalCode: {type: string, description: Postal code.}
+        directBilling: {type: boolean, description: True if the clinic bills Nordlys directly.}
+        agreementValidUntil: {type: string, format: date, description: End date of the billing agreement.}

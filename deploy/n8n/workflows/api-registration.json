@@ -1,0 +1,892 @@
+{
+  "id": "de2be66729d95b4a",
+  "name": "B · New API registration (agent + human review)",
+  "active": false,
+  "nodes": [
+    {
+      "id": "bfc9fe61-dbaf-51d6-a72a-74429507b755",
+      "name": "API registration submitted",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "api-registration",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "0df26096-618b-5f49-bb26-020904fa3253",
+      "notes": "[trigger] Portal or CI pipeline submits an OpenAPI spec",
+      "notesInFlow": true
+    },
+    {
+      "id": "14de31e9-b9a3-5964-8113-125fc1de5f91",
+      "name": "Authenticate & read submission",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// [rule] Shared API key (constant-time compare), required fields, size limit.\nconst crypto = require('crypto');\nconst item = $input.first().json;\nconst key = String((item.headers || {})['x-api-key'] || '');\nconst expected = String($env.NORDLYS_REGISTRATION_API_KEY || '');\nconst authOk = key.length === expected.length && expected.length > 0 &&\n  crypto.timingSafeEqual(Buffer.from(key), Buffer.from(expected));\nconst b = item.body || {};\nconst okShape = typeof b.spec === 'string' && b.spec.length > 10 && b.spec.length <= 512 * 1024\n  && typeof b.submitted_by === 'string' && /^[^@\\s]+@[^@\\s]+$/.test(b.submitted_by);\nreturn [{ json: { ok: authOk && okShape, status: !authOk ? 401 : 400,\n  reason: !authOk ? 'invalid API key' : !okShape ? 'need spec (string) and submitted_by (e-mail)' : 'ok',\n  spec: okShape ? b.spec : null, submitted_by: okShape ? b.submitted_by : null } }];\n"
+      },
+      "notes": "[rule] API key, schema, size",
+      "notesInFlow": true
+    },
+    {
+      "id": "bde59ae2-29a2-5359-95dc-632e3ae0fbf0",
+      "name": "Accepted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dae0ec76-0e11-5ce1-a9ae-8dc6d50a522e",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "[rule]",
+      "notesInFlow": true
+    },
+    {
+      "id": "2aae1cdf-6569-542e-a8b1-45e43cfd059a",
+      "name": "Refuse submission",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        720,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": $json.reason } }}",
+        "options": {
+          "responseCode": "={{ $json.status }}"
+        }
+      }
+    },
+    {
+      "id": "98fe10dd-31e9-580b-83dc-d636f50382e9",
+      "name": "Acknowledge (202)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"accepted\": true, \"tracking_id\": $execution.id } }}",
+        "options": {
+          "responseCode": 202
+        }
+      }
+    },
+    {
+      "id": "75561b37-86e1-5021-babb-734ef93341f1",
+      "name": "Service token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NORDLYS_TOKEN_URL }}",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "={{ $env.NORDLYS_N8N_CLIENT_ID }}"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $env.NORDLYS_N8N_CLIENT_SECRET }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system]",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "02526873-95e3-51c8-a7c3-532588aa5bf2",
+      "name": "Deterministic checks (catalog)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NORDLYS_CATALOG_URL }}/v1/registrations/validate",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Service token').first().json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"spec\": $(\"Authenticate & read submission\").first().json.spec } }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[rule] OpenAPI 3.1, metadata, coverage, injection scan, duplicates, version",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "f4786f92-5ea5-5c41-8c7e-098c7e69999d",
+      "name": "Spec valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f46c58a6-149f-5e52-a4bf-cdaf11672bab",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "[rule]",
+      "notesInFlow": true
+    },
+    {
+      "id": "14db1557-20d9-5c7d-b1c4-b972cddeaf3d",
+      "name": "AI classification (agent)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NORDLYS_AGENT_URL }}/v1/classify-registration",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Service token').first().json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"check\": $(\"Deterministic checks (catalog)\").first().json } }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[AI] domain, owner, doc critique + confidence (advisory)",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "b63fdde3-6acc-5635-9ab8-2dd47e7a7e11",
+      "name": "Decision gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// [rule] The gate is deterministic. The AI suggests; rules decide whether a human must look.\n// Auto-accept only when every signal agrees and nothing is risky.\nconst c = $('Deterministic checks (catalog)').first().json;\nconst ai = $json;\nconst sub = $('Authenticate & read submission').first().json;\nconst cls = ai.available ? ai.classification : null;\nconst reasons = [];\nif (c.version_exists) {\n  return [{ json: { route: 2, reject_reason: `${c.api_id} v${c.major_version} already exists - bump the major version`,\n    check: c, ai, submitted_by: sub.submitted_by } }];\n}\nif (!cls) reasons.push(`AI step unavailable (${ai.reason || 'no model'})`);\nif (cls && cls.domain_confidence < 0.8) reasons.push(`AI domain confidence ${Math.round(cls.domain_confidence * 100)}% < 80%`);\nif (cls && cls.owner_confidence < 0.8) reasons.push(`AI owner confidence ${Math.round(cls.owner_confidence * 100)}% < 80%`);\nif (cls && c.declared_domain && cls.domain !== c.declared_domain) reasons.push(`AI says ${cls.domain}, spec declares ${c.declared_domain}`);\nif (cls && cls.owner_team === 'unknown' && !c.declared_owner_team) reasons.push('no owner team identified');\nif (cls && cls.doc_quality <= 2) reasons.push(`AI rates documentation ${cls.doc_quality}/5`);\nif (cls && cls.notes) reasons.push(`AI notes: ${cls.notes}`);\nif (c.content_warnings.length) reasons.push(`content warnings (possible prompt injection): ${c.content_warnings.join(', ')}`);\nif (c.description_coverage < 0.8) reasons.push(`only ${Math.round(c.description_coverage * 100)}% of operations documented`);\nfor (const d of c.duplicates) {\n  if (d.endpoint_overlap >= 0.5) reasons.push(`possible duplicate of ${d.api_id} v${d.major_version} (${Math.round(d.endpoint_overlap * 100)}% endpoint overlap)`);\n}\nconst proposal = {\n  domain: c.declared_domain || (cls ? cls.domain : 'unknown'),\n  owner_team: c.declared_owner_team || (cls && cls.owner_team !== 'unknown' ? cls.owner_team : 'api-governance'),\n};\nif (proposal.domain === 'unknown') reasons.push('no domain identified');\n// 0 = auto-accept, 1 = human review, 2 = reject\nreturn [{ json: { route: reasons.length ? 1 : 0, review_reasons: reasons, proposal, check: c, ai,\n  submitted_by: sub.submitted_by } }];\n"
+      },
+      "notes": "[rule] combine AI + rules -> auto / review / reject",
+      "notesInFlow": true
+    },
+    {
+      "id": "612fc653-580a-51ec-a338-b9ab0387e361",
+      "name": "Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 3,
+        "output": "={{ $json.route }}"
+      },
+      "notes": "[rule] 0 auto · 1 review · 2 reject",
+      "notesInFlow": true
+    },
+    {
+      "id": "516780f4-43cc-523c-94da-0a9745bb2504",
+      "name": "Prepare review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        400
+      ],
+      "parameters": {
+        "jsCode": "// [rule] Signed Accept / Reject links for the reviewer (same scheme as workflow A).\nconst crypto = require('crypto');\nconst g = $('Decision gate').first().json;\nconst reviewer = $env.NORDLYS_REVIEWER_EMAIL;\n// The chosen domain is part of the signature, so it cannot be edited in the link either.\nconst sign = (d, dom) => crypto.createHmac('sha256', $env.NORDLYS_LINK_SIGNING_SECRET)\n  .update([$execution.id, 'review', reviewer, d, dom].join('|')).digest('hex');\nconst base = $execution.resumeUrl;\nconst link = (d, dom = '') => `${base}${base.includes('?') ? '&' : '?'}reviewer=${encodeURIComponent(reviewer)}&decision=${d}&domain=${dom}&sig=${sign(d, dom)}`;\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst c = g.check, ai = g.ai;\nconst aiBlock = ai.available\n  ? `<p><b>AI suggestion</b> (${esc(ai.model)}, advisory only): domain <b>${esc(ai.classification.domain)}</b>\n     (${Math.round(ai.classification.domain_confidence * 100)}%), owner <b>${esc(ai.classification.owner_team)}</b>\n     (${Math.round(ai.classification.owner_confidence * 100)}%), doc quality ${ai.classification.doc_quality}/5.<br>\n     ${esc(ai.classification.summary)}<br>Gaps: ${esc((ai.classification.doc_gaps || []).join('; '))}</p>`\n  : `<p><b>AI suggestion unavailable</b>: ${esc(ai.reason)}. Review manually.</p>`;\nreturn [{ json: { reviewer, html: `\n  <p><b>${esc(c.title)}</b> (${esc(c.api_id)} v${c.major_version}) submitted by ${esc(g.submitted_by)}.</p>\n  <p>Proposed: domain <b>${esc(g.proposal.domain)}</b>, owner <b>${esc(g.proposal.owner_team)}</b>.</p>\n  <p><b>Why you are asked:</b></p><ul>${g.review_reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>\n  <p><b>Checks (deterministic):</b> description coverage ${Math.round(c.description_coverage * 100)}%,\n     content warnings: ${esc(c.content_warnings.join(', ') || 'none')},\n     possible duplicates (>= 30% shared endpoints): ${esc(c.duplicates.filter((d) => d.endpoint_overlap >= 0.3).map((d) => `${d.api_id} v${d.major_version} (${Math.round(d.endpoint_overlap * 100)}%)`).join(', ') || 'none')};\n     closest existing API by search: ${esc((c.duplicates.find((d) => d.search_rank === 1) || {}).api_id || 'n/a')}.</p>\n  ${aiBlock}\n  ${g.proposal.domain !== 'unknown'\n    ? `<p><a href=\"${link('accepted', g.proposal.domain)}\">Accept as proposed</a> &nbsp;|&nbsp; <a href=\"${link('rejected')}\">Reject</a></p>`\n    : `<p>No domain could be determined. Accept into domain:</p><p>${c.known_domains.map((d) =>\n        `<a href=\"${link('accepted', d)}\">${esc(d)}</a>`).join(' &nbsp;|&nbsp; ')}</p><p><a href=\"${link('rejected')}\">Reject</a></p>`}` } }];\n"
+      },
+      "notes": "[rule] signed review links",
+      "notesInFlow": true
+    },
+    {
+      "id": "c4044862-817b-5f53-ae26-28717efa1ae2",
+      "name": "E-mail reviewer",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        960,
+        400
+      ],
+      "parameters": {
+        "fromEmail": "discovery-platform@nordlys.example",
+        "toEmail": "={{ $json.reviewer }}",
+        "subject": "=Review API registration: {{ $('Decision gate').first().json.check.title }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "mailpit-smtp",
+          "name": "Mailpit SMTP (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[human] API governance reviews",
+      "notesInFlow": true
+    },
+    {
+      "id": "0a789cc2-ae14-5e25-bfad-61c0798a6278",
+      "name": "Wait for review",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        400
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "GET",
+        "responseMode": "onReceived",
+        "limitWaitTime": true,
+        "limitType": "afterTimeInterval",
+        "resumeAmount": "={{ Number($env.NORDLYS_REVIEW_TIMEOUT_MINUTES || 4320) }}",
+        "resumeUnit": "minutes",
+        "options": {
+          "responseData": "Thank you - your review was received."
+        }
+      },
+      "webhookId": "0ef66011-be9f-5ad1-bc61-a300730525a5",
+      "notes": "[human] Pauses until a link is clicked or the timeout",
+      "notesInFlow": true
+    },
+    {
+      "id": "49661008-6988-5b5e-a91a-3b69bf930c35",
+      "name": "Verify review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        400
+      ],
+      "parameters": {
+        "jsCode": "// [rule] Verify the reviewer's link. Timeout -> rejected (expired). Bad signature -> ops.\nconst crypto = require('crypto');\nconst q = ($json.query) || {};\nif (!q.decision) return [{ json: { route: 1, outcome: 'expired', reviewer: null } }];\nconst dom = q.domain || '';\nconst expected = crypto.createHmac('sha256', $env.NORDLYS_LINK_SIGNING_SECRET)\n  .update([$execution.id, 'review', q.reviewer, q.decision, dom].join('|')).digest('hex');\nconst known = $('Deterministic checks (catalog)').first().json.known_domains;\nconst ok = typeof q.sig === 'string' && q.sig.length === expected.length &&\n  crypto.timingSafeEqual(Buffer.from(q.sig), Buffer.from(expected)) && q.reviewer === $env.NORDLYS_REVIEWER_EMAIL\n  && (q.decision !== 'accepted' || known.includes(dom));\nif (!ok) return [{ json: { route: 2, outcome: 'invalid', reviewer: null, vote: 'invalid', reason: 'review link signature invalid' } }];\n// 0 = publish, 1 = reject, 2 = invalid\nreturn [{ json: { route: q.decision === 'accepted' ? 0 : 1, outcome: q.decision, reviewer: q.reviewer, domain: dom || null } }];\n"
+      },
+      "notes": "[rule] signature + timeout",
+      "notesInFlow": true
+    },
+    {
+      "id": "a2ef808c-3107-5f02-889d-bb949b8bbb84",
+      "name": "Review outcome",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1680,
+        400
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 3,
+        "output": "={{ $json.route }}"
+      },
+      "notes": "[rule] 0 publish · 1 reject · 2 invalid",
+      "notesInFlow": true
+    },
+    {
+      "id": "4b6757d8-a719-57be-adcc-792d73441019",
+      "name": "Fresh service token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        600
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NORDLYS_TOKEN_URL }}",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "={{ $env.NORDLYS_N8N_CLIENT_ID }}"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $env.NORDLYS_N8N_CLIENT_SECRET }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system] tokens expire while humans review",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "8659ccb2-d400-5de9-97ed-d67350f30e69",
+      "name": "Publish to catalog",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        600
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NORDLYS_CATALOG_URL }}/v1/registrations",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"spec\": $(\"Authenticate & read submission\").first().json.spec, \"domain\": $(\"Decision gate\").first().json.route === 0 ? $(\"Decision gate\").first().json.proposal.domain : $(\"Verify review\").first().json.domain, \"owner_team\": $(\"Decision gate\").first().json.proposal.owner_team, \"submitted_by\": $(\"Decision gate\").first().json.submitted_by, \"decision\": $(\"Decision gate\").first().json.route === 0 ? \"auto_accepted\" : \"human_approved\", \"reviewed_by\": $(\"Decision gate\").first().json.route === 0 ? null : $(\"Verify review\").first().json.reviewer } }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system] write spec + ingest (embeddings, search) + audit",
+      "notesInFlow": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "43de6c1e-111a-5fe3-88c4-24cc0311509c",
+      "name": "Tell submitter: published",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2160,
+        600
+      ],
+      "parameters": {
+        "fromEmail": "discovery-platform@nordlys.example",
+        "toEmail": "={{ $('Decision gate').first().json.submitted_by }}",
+        "subject": "=Your API {{ $('Publish to catalog').first().json.api_id }} v{{ $('Publish to catalog').first().json.major_version }} is in the catalog",
+        "emailFormat": "html",
+        "html": "=<p>Published as <b>{{ $('Publish to catalog').first().json.api_id }}</b> v{{ $('Publish to catalog').first().json.major_version }} in domain {{ $('Decision gate').first().json.proposal.domain }}, owned by {{ $('Decision gate').first().json.proposal.owner_team }}.</p><p>Decision: {{ $('Decision gate').first().json.route === 0 ? 'automatically accepted (all checks passed)' : 'approved by ' + $('Verify review').first().json.reviewer }}.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "mailpit-smtp",
+          "name": "Mailpit SMTP (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system]",
+      "notesInFlow": true
+    },
+    {
+      "id": "a6d85723-ffb7-52f4-bd76-3768e7ad82c5",
+      "name": "Tell submitter: not published",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2160,
+        400
+      ],
+      "parameters": {
+        "fromEmail": "discovery-platform@nordlys.example",
+        "toEmail": "={{ $('Decision gate').first().json.submitted_by }}",
+        "subject": "=Your API registration was not published",
+        "emailFormat": "html",
+        "html": "=<p>Your registration of <b>{{ $('Decision gate').first().json.check.title }}</b> was not published.</p><p>{{ $('Decision gate').first().json.reject_reason || ($json.outcome === 'expired' ? 'No review decision within the review period.' : 'Rejected by the API governance reviewer.') }}</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "mailpit-smtp",
+          "name": "Mailpit SMTP (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[system]",
+      "notesInFlow": true
+    },
+    {
+      "id": "a8d3122c-ad46-54b4-b1d9-ab2e28dd4144",
+      "name": "Tell submitter: invalid spec",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1680,
+        200
+      ],
+      "parameters": {
+        "fromEmail": "discovery-platform@nordlys.example",
+        "toEmail": "={{ $('Authenticate & read submission').first().json.submitted_by }}",
+        "subject": "=Your OpenAPI spec could not be registered",
+        "emailFormat": "html",
+        "html": "=<p>The specification failed validation:</p><ul>{{ $json.errors.map(e => '<li>' + e.replace(/</g, '&lt;') + '</li>').join('') }}</ul>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "mailpit-smtp",
+          "name": "Mailpit SMTP (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[rule] fail fast, no AI call needed",
+      "notesInFlow": true
+    },
+    {
+      "id": "e872a00c-7bf0-5a86-a0be-49c125a2e59e",
+      "name": "Describe failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// [rule] Any failed call ends here. Nothing is published by a failed run.\nconst input = $input.first().json;\nconst what = input.vote === 'invalid' ? input.reason\n  : (input.error && (input.error.message || JSON.stringify(input.error))) || 'unknown error';\nreturn [{ json: { what: String(what).slice(0, 500), execution: $execution.id } }];\n"
+      },
+      "notes": "[rule] error branch",
+      "notesInFlow": true
+    },
+    {
+      "id": "ea39678d-ab1d-57dc-a4ed-ac196e22f509",
+      "name": "Alert platform ops",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2160,
+        800
+      ],
+      "parameters": {
+        "fromEmail": "discovery-platform@nordlys.example",
+        "toEmail": "={{ $env.NORDLYS_OPS_EMAIL }}",
+        "subject": "=API registration workflow needs attention ({{ $json.execution }})",
+        "emailFormat": "html",
+        "html": "=<p>{{ $json.what }}</p><p>n8n execution {{ $json.execution }}. Nothing was published.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "mailpit-smtp",
+          "name": "Mailpit SMTP (local)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "[human]",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "API registration submitted": {
+      "main": [
+        [
+          {
+            "node": "Authenticate & read submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authenticate & read submission": {
+      "main": [
+        [
+          {
+            "node": "Accepted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accepted?": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge (202)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuse submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acknowledge (202)": {
+      "main": [
+        [
+          {
+            "node": "Service token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Service token": {
+      "main": [
+        [
+          {
+            "node": "Deterministic checks (catalog)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deterministic checks (catalog)": {
+      "main": [
+        [
+          {
+            "node": "Spec valid?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spec valid?": {
+      "main": [
+        [
+          {
+            "node": "AI classification (agent)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tell submitter: invalid spec",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI classification (agent)": {
+      "main": [
+        [
+          {
+            "node": "Decision gate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision gate": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Fresh service token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tell submitter: not published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare review": {
+      "main": [
+        [
+          {
+            "node": "E-mail reviewer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "E-mail reviewer": {
+      "main": [
+        [
+          {
+            "node": "Wait for review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for review": {
+      "main": [
+        [
+          {
+            "node": "Verify review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify review": {
+      "main": [
+        [
+          {
+            "node": "Review outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review outcome": {
+      "main": [
+        [
+          {
+            "node": "Fresh service token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tell submitter: not published",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fresh service token": {
+      "main": [
+        [
+          {
+            "node": "Publish to catalog",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish to catalog": {
+      "main": [
+        [
+          {
+            "node": "Tell submitter: published",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe failure": {
+      "main": [
+        [
+          {
+            "node": "Alert platform ops",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "errorWorkflow": "3c9ff3aaa0225ab4"
+  },
+  "pinData": {},
+  "tags": []
+}

@@ -21,7 +21,8 @@ RUN --mount=type=secret,id=ca_bundle,required=false \
     uv sync --frozen --no-dev --no-editable --extra azure
 
 FROM python:3.12-slim
-RUN useradd --system --uid 10001 --home /app app
+RUN useradd --system --uid 10001 --home /app app \
+    && mkdir -p /data/registrations && chown -R app /data   # volume mount point, writable by the app user
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY --from=model /app/models/model /models/bge-small-en-v1.5-onnx-q

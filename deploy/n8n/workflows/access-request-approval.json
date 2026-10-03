@@ -30,7 +30,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        260,
+        240,
         0
       ],
       "parameters": {
@@ -45,7 +45,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        520,
+        480,
         0
       ],
       "parameters": {
@@ -81,8 +81,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
       "position": [
-        780,
-        180
+        720,
+        200
       ],
       "parameters": {
         "respondWith": "json",
@@ -98,7 +98,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
       "position": [
-        780,
+        720,
         0
       ],
       "parameters": {
@@ -117,7 +117,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1040,
+        960,
         0
       ],
       "parameters": {
@@ -158,7 +158,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1300,
+        1200,
         0
       ],
       "parameters": {
@@ -190,7 +190,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1560,
+        1440,
         0
       ],
       "parameters": {
@@ -205,7 +205,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
       "position": [
-        1820,
+        1680,
         0
       ],
       "parameters": {
@@ -222,8 +222,8 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        2080,
-        180
+        1920,
+        0
       ],
       "parameters": {},
       "notes": "Idempotent: a redelivered event changes nothing",
@@ -235,8 +235,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2080,
-        0
+        720,
+        400
       ],
       "parameters": {
         "jsCode": "// [rule] One approve and one reject link per approver. Each link carries an HMAC over\n// (execution id, stage, approver, decision), so a recipient cannot edit the URL to approve\n// as someone else or at another stage. The resume URL itself is unguessable per execution.\nconst crypto = require('crypto');\nconst plan = $('Plan approval chain').first().json;\nconst stage = plan.stages[1 - 1];\nconst secret = $env.NORDLYS_LINK_SIGNING_SECRET;\nconst sign = (d) => crypto.createHmac('sha256', secret)\n  .update([$execution.id, 1, stage.approver, d].join('|')).digest('hex');\n// n8n 2.x resume URLs already carry their own ?signature=..., so append with '&'.\nconst base = $execution.resumeUrl;\nconst link = (d) => `${base}${base.includes('?') ? '&' : '?'}stage=${1}&approver=${encodeURIComponent(stage.approver)}&decision=${d}&sig=${sign(d)}`;\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst r = plan.request;\nreturn [{ json: {\n  approver: stage.approver, role: stage.role, stage: 1,\n  approve_url: link('approved'), reject_url: link('rejected'),\n  // Requester-controlled text is HTML-escaped before it goes into an e-mail.\n  html: `<p>${esc(r.requester)} requests <b>${esc(r.requested_scope)}</b> on\n         <b>${esc(r.asset_type)} ${esc(r.asset_id)}${r.major_version ? ' v' + r.major_version : ''}</b>.</p>\n         <p>Purpose: <b>${esc(r.purpose)}</b><br>Justification: ${esc(r.justification)}</p>\n         <p>Approval route: ${esc(r.approval_route)} (stage ${1} of ${plan.stages.length}, you approve as ${esc(stage.role)}).</p>\n         <p><a href=\"${link('approved')}\">Approve</a> &nbsp;|&nbsp; <a href=\"${link('rejected')}\">Reject</a></p>\n         <p style=\"color:#666\">Link expires in ${plan.timeout_minutes} minutes. Request id ${esc(r.id)}.</p>`,\n}}];\n"
@@ -250,8 +250,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        2340,
-        0
+        960,
+        400
       ],
       "parameters": {
         "fromEmail": "discovery-platform@nordlys.example",
@@ -281,8 +281,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        2600,
-        0
+        1200,
+        400
       ],
       "parameters": {
         "resume": "webhook",
@@ -306,8 +306,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2860,
-        0
+        1440,
+        400
       ],
       "parameters": {
         "jsCode": "// [rule] Verify the clicked link. Timeout -> 'expired'. A bad signature, the wrong approver\n// or the requester approving their own request -> 'invalid' (alerts ops, decides nothing).\nconst crypto = require('crypto');\nconst plan = $('Plan approval chain').first().json;\nconst stage = plan.stages[1 - 1];\nconst q = ($json.query) || {};\nif (!q.decision) {\n  return [{ json: { vote: 'expired', stage: 1, approver: null, route: 2,\n    reason: `no decision within ${plan.timeout_minutes} minutes` } }];\n}\nconst expected = crypto.createHmac('sha256', $env.NORDLYS_LINK_SIGNING_SECRET)\n  .update([$execution.id, 1, q.approver, q.decision].join('|')).digest('hex');\nconst sigOk = typeof q.sig === 'string' && q.sig.length === expected.length &&\n  crypto.timingSafeEqual(Buffer.from(q.sig), Buffer.from(expected));\nlet vote = q.decision === 'approved' ? 'approved' : q.decision === 'rejected' ? 'rejected' : 'invalid';\nlet reason = `${q.approver} ${q.decision} at stage ${1}`;\nif (!sigOk) { vote = 'invalid'; reason = 'approval link signature invalid'; }\nelse if (q.approver !== stage.approver) { vote = 'invalid'; reason = 'approver does not match this stage'; }\nelse if (q.approver === plan.request.requester_email) { vote = 'invalid'; reason = 'requester cannot approve own request'; }\nconst last = 1 === plan.stages.length;\n// Routing for the next Switch: 0 = next stage, 1 = final approve, 2 = final reject/expire, 3 = invalid.\nconst route = vote === 'approved' ? (last ? 1 : 0) : (vote === 'invalid' ? 3 : 2);\nreturn [{ json: { vote, stage: 1, approver: vote === 'invalid' ? null : q.approver, reason, route } }];\n"
@@ -321,8 +321,8 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
       "position": [
-        3120,
-        0
+        1680,
+        400
       ],
       "parameters": {
         "mode": "expression",
@@ -338,8 +338,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3380,
-        0
+        720,
+        600
       ],
       "parameters": {
         "jsCode": "// [rule] One approve and one reject link per approver. Each link carries an HMAC over\n// (execution id, stage, approver, decision), so a recipient cannot edit the URL to approve\n// as someone else or at another stage. The resume URL itself is unguessable per execution.\nconst crypto = require('crypto');\nconst plan = $('Plan approval chain').first().json;\nconst stage = plan.stages[2 - 1];\nconst secret = $env.NORDLYS_LINK_SIGNING_SECRET;\nconst sign = (d) => crypto.createHmac('sha256', secret)\n  .update([$execution.id, 2, stage.approver, d].join('|')).digest('hex');\n// n8n 2.x resume URLs already carry their own ?signature=..., so append with '&'.\nconst base = $execution.resumeUrl;\nconst link = (d) => `${base}${base.includes('?') ? '&' : '?'}stage=${2}&approver=${encodeURIComponent(stage.approver)}&decision=${d}&sig=${sign(d)}`;\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst r = plan.request;\nreturn [{ json: {\n  approver: stage.approver, role: stage.role, stage: 2,\n  approve_url: link('approved'), reject_url: link('rejected'),\n  // Requester-controlled text is HTML-escaped before it goes into an e-mail.\n  html: `<p>${esc(r.requester)} requests <b>${esc(r.requested_scope)}</b> on\n         <b>${esc(r.asset_type)} ${esc(r.asset_id)}${r.major_version ? ' v' + r.major_version : ''}</b>.</p>\n         <p>Purpose: <b>${esc(r.purpose)}</b><br>Justification: ${esc(r.justification)}</p>\n         <p>Approval route: ${esc(r.approval_route)} (stage ${2} of ${plan.stages.length}, you approve as ${esc(stage.role)}).</p>\n         <p><a href=\"${link('approved')}\">Approve</a> &nbsp;|&nbsp; <a href=\"${link('rejected')}\">Reject</a></p>\n         <p style=\"color:#666\">Link expires in ${plan.timeout_minutes} minutes. Request id ${esc(r.id)}.</p>`,\n}}];\n"
@@ -353,8 +353,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        3640,
-        0
+        960,
+        600
       ],
       "parameters": {
         "fromEmail": "discovery-platform@nordlys.example",
@@ -384,8 +384,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        3900,
-        0
+        1200,
+        600
       ],
       "parameters": {
         "resume": "webhook",
@@ -409,8 +409,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4160,
-        0
+        1440,
+        600
       ],
       "parameters": {
         "jsCode": "// [rule] Verify the clicked link. Timeout -> 'expired'. A bad signature, the wrong approver\n// or the requester approving their own request -> 'invalid' (alerts ops, decides nothing).\nconst crypto = require('crypto');\nconst plan = $('Plan approval chain').first().json;\nconst stage = plan.stages[2 - 1];\nconst q = ($json.query) || {};\nif (!q.decision) {\n  return [{ json: { vote: 'expired', stage: 2, approver: null, route: 2,\n    reason: `no decision within ${plan.timeout_minutes} minutes` } }];\n}\nconst expected = crypto.createHmac('sha256', $env.NORDLYS_LINK_SIGNING_SECRET)\n  .update([$execution.id, 2, q.approver, q.decision].join('|')).digest('hex');\nconst sigOk = typeof q.sig === 'string' && q.sig.length === expected.length &&\n  crypto.timingSafeEqual(Buffer.from(q.sig), Buffer.from(expected));\nlet vote = q.decision === 'approved' ? 'approved' : q.decision === 'rejected' ? 'rejected' : 'invalid';\nlet reason = `${q.approver} ${q.decision} at stage ${2}`;\nif (!sigOk) { vote = 'invalid'; reason = 'approval link signature invalid'; }\nelse if (q.approver !== stage.approver) { vote = 'invalid'; reason = 'approver does not match this stage'; }\nelse if (q.approver === plan.request.requester_email) { vote = 'invalid'; reason = 'requester cannot approve own request'; }\nconst last = 2 === plan.stages.length;\n// Routing for the next Switch: 0 = next stage, 1 = final approve, 2 = final reject/expire, 3 = invalid.\nconst route = vote === 'approved' ? (last ? 1 : 0) : (vote === 'invalid' ? 3 : 2);\nreturn [{ json: { vote, stage: 2, approver: vote === 'invalid' ? null : q.approver, reason, route } }];\n"
@@ -424,8 +424,8 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
       "position": [
-        4420,
-        0
+        1680,
+        600
       ],
       "parameters": {
         "mode": "expression",
@@ -441,8 +441,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4680,
-        180
+        0,
+        800
       ],
       "parameters": {
         "jsCode": "// [rule] Combine the stage votes into one decision. Only humans approve: 'approved' requires\n// every stage to have been approved by a verified approver link.\nconst plan = $('Plan approval chain').first().json;\nconst votes = [];\nfor (const n of [1, 2]) {\n  try { votes.push($(`Verify vote (stage ${n})`).first().json); } catch (e) { /* stage not run */ }\n}\nconst last = votes[votes.length - 1];\nconst approved = votes.length === plan.stages.length && votes.every((v) => v.vote === 'approved');\nconst expired = last && last.vote === 'expired';\nconst decided_by = approved || !expired ? last.approver : 'workflow-timeout@nordlys.example';\nconst note = approved\n  ? `Approved by ${votes.map((v) => v.approver).join(' and ')} via n8n workflow A`\n  : expired ? `Expired: ${last.reason}` : `Rejected by ${last.approver} at stage ${last.stage}`;\nreturn [{ json: { decision: approved ? 'approved' : 'rejected', decided_by, note, expired: !!expired,\n  request: plan.request, votes } }];\n"
@@ -456,8 +456,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        4940,
-        180
+        240,
+        800
       ],
       "parameters": {
         "method": "POST",
@@ -497,8 +497,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        5200,
-        180
+        480,
+        800
       ],
       "parameters": {
         "method": "POST",
@@ -540,8 +540,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        5460,
-        180
+        720,
+        800
       ],
       "parameters": {
         "conditions": {
@@ -576,8 +576,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        5720,
-        0
+        960,
+        800
       ],
       "parameters": {
         "method": "GET",
@@ -608,8 +608,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        5980,
-        0
+        1200,
+        800
       ],
       "parameters": {
         "method": "POST",
@@ -649,8 +649,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        6240,
-        0
+        1440,
+        800
       ],
       "parameters": {
         "method": "GET",
@@ -681,8 +681,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        6500,
-        0
+        1680,
+        800
       ],
       "parameters": {
         "method": "POST",
@@ -716,8 +716,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        6760,
-        0
+        1920,
+        800
       ],
       "parameters": {
         "method": "POST",
@@ -751,8 +751,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        7020,
-        180
+        2160,
+        800
       ],
       "parameters": {
         "fromEmail": "discovery-platform@nordlys.example",
@@ -782,8 +782,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        5720,
-        540
+        1920,
+        1000
       ],
       "parameters": {
         "jsCode": "// [rule] Any failed call ends here: describe it for humans and for the audit log.\n// The access request is untouched (still pending or already decided), so nothing is lost.\nconst input = $input.first().json;\nlet request_id = null;\ntry { request_id = $('Verify signature & payload').first().json.request.id; } catch (e) {}\nconst what = input.unroutable ? `no approver for ${input.unroutable.join(', ')}`\n  : input.vote === 'invalid' ? input.reason\n  : (input.error && (input.error.message || JSON.stringify(input.error))) || 'unknown error';\nreturn [{ json: { request_id, what: String(what).slice(0, 500), execution: $execution.id } }];\n"
@@ -797,8 +797,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        5980,
-        540
+        2160,
+        1000
       ],
       "parameters": {
         "fromEmail": "discovery-platform@nordlys.example",

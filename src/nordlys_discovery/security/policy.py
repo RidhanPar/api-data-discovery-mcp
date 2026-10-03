@@ -23,7 +23,7 @@ TOOL_SCOPES: dict[str, str] = {
 }
 # Reading resources (raw specs, contracts) needs the same scope as the matching tools.
 RESOURCE_SCOPE = "catalog.read"
-PLATFORM_SCOPES = frozenset({*TOOL_SCOPES.values(), "access.approve", "catalog.internal"})
+PLATFORM_SCOPES = frozenset({*TOOL_SCOPES.values(), "access.approve", "catalog.internal", "catalog.publish"})
 
 
 class PolicyDecision(BaseModel):

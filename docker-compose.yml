@@ -61,7 +61,11 @@ services:
     image: nordlys-discovery:dev
     build: .
     command: ["sh", "-c", "alembic upgrade head && python -m nordlys_discovery.ingest"]
-    environment: *app-env
+    environment:
+      <<: *app-env
+      NORDLYS_REGISTRATIONS_DIR: /data/registrations
+    volumes:
+      - registrations:/data/registrations
     depends_on:
       db: {condition: service_healthy}
 
@@ -69,9 +73,12 @@ services:
     image: nordlys-discovery:dev
     environment:
       <<: *app-env
+      NORDLYS_REGISTRATIONS_DIR: /data/registrations
       NORDLYS_ACCESS_REQUEST_WEBHOOK_URL: http://n8n:5678/webhook/access-request-created
       NORDLYS_ACCESS_REQUEST_WEBHOOK_SECRET: ${WEBHOOK_SECRET:-local-webhook-secret-change-me}
     ports: ["8000:8000"]
+    volumes:
+      - registrations:/data/registrations
     depends_on:
       migrate: {condition: service_completed_successfully}
       keycloak: {condition: service_healthy}
@@ -87,6 +94,28 @@ services:
     ports: ["8001:8001"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/live', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      catalog: {condition: service_healthy}
+
+  agent:
+    image: nordlys-discovery:dev
+    command: ["uvicorn", "nordlys_discovery.agent.app:app", "--host", "0.0.0.0", "--port", "8002"]
+    environment:
+      <<: *app-env
+      NORDLYS_CATALOG_API_URL: http://catalog:8000
+      # "none" = no generative steps: Workflow B then routes every registration to a human.
+      NORDLYS_LLM_PROVIDER: ${NORDLYS_LLM_PROVIDER:-none}
+      NORDLYS_AZURE_OPENAI_ENDPOINT: ${NORDLYS_AZURE_OPENAI_ENDPOINT:-}
+      NORDLYS_AZURE_OPENAI_API_KEY: ${NORDLYS_AZURE_OPENAI_API_KEY:-}
+      NORDLYS_AZURE_OPENAI_CHAT_DEPLOYMENT: ${NORDLYS_AZURE_OPENAI_CHAT_DEPLOYMENT:-gpt-4.1-mini}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      NORDLYS_OPENAI_API_KEY: ${NORDLYS_OPENAI_API_KEY:-}
+    ports: ["8002:8002"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health/live', timeout=2)"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -123,6 +152,9 @@ services:
       NORDLYS_LINK_SIGNING_SECRET: ${LINK_SIGNING_SECRET:-local-link-secret-change-me}
       NORDLYS_APPROVAL_TIMEOUT_MINUTES: ${APPROVAL_TIMEOUT_MINUTES:-1440}
       NORDLYS_OPS_EMAIL: platform-ops@nordlys.example
+      NORDLYS_REVIEWER_EMAIL: api-governance@nordlys.example
+      NORDLYS_REVIEW_TIMEOUT_MINUTES: ${REVIEW_TIMEOUT_MINUTES:-4320}
+      NORDLYS_REGISTRATION_API_KEY: ${REGISTRATION_API_KEY:-local-registration-key-change-me}
       NORDLYS_AGENT_URL: http://agent:8002
     volumes:
       - ./deploy/n8n:/import:ro
@@ -139,3 +171,4 @@ services:
 
 volumes:
   pgdata:
+  registrations:

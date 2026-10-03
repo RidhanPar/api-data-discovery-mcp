@@ -32,7 +32,8 @@ def main() -> int:
     with session_scope() as session:
         if args.reembed:
             reset_embeddings(session)
-        report = ingest_catalog(session, args.catalog_dir, embedder, prune=not args.no_prune)
+        extra = [settings.registrations_dir] if settings.registrations_dir else []
+        report = ingest_catalog(session, args.catalog_dir, embedder, prune=not args.no_prune, extra_roots=extra)
     print(json.dumps(report.as_dict(), indent=2))
     return 2 if report.errors else 0
 

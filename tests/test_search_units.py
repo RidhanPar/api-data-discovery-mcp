@@ -180,3 +180,16 @@ def test_onnx_embeddings_are_semantic(onnx: Any) -> None:
     sims = [sum(a * b for a, b in zip(q, d, strict=True)) for d in docs]
     assert len(q) == 384
     assert sims[0] > sims[1]
+
+
+def test_partial_x_nordlys_block_is_resolved_field_by_field() -> None:
+    from nordlys_discovery.catalog.metadata import extract_metadata
+
+    doc = {
+        "openapi": "3.1.0",
+        "info": {"title": "Vet Clinic Directory API", "version": "1.0.0", "x-nordlys": {"countries": ["SE", "NO"]}},
+        "paths": {},
+    }
+    m = extract_metadata(doc, Path("/reg/apis/unknown/vet-clinic-directory-api.v1.yaml"))
+    assert m.api_id == "vet-clinic-directory-api" and m.countries == ("SE", "NO")
+    assert m.provenance["countries"] == "x-nordlys" and m.provenance["domain"] == "missing"

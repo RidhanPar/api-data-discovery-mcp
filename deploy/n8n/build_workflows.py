@@ -151,6 +151,13 @@ class Flow:
             notesInFlow=True,
         )
 
+    def layout(self, grid: dict[str, tuple[int, int]], dx: int = 240, dy: int = 200) -> None:
+        """Place nodes on a readable grid of lanes (column, row)."""
+        for n in self.nodes:
+            if n["name"] in grid:
+                col, row = grid[n["name"]]
+                n["position"] = [col * dx, row * dy]
+
     def to_json(self, settings: JSON | None = None) -> JSON:
         return {
             "id": str(uuid.uuid5(NS, self.slug)).replace("-", "")[:16],
@@ -594,6 +601,391 @@ return [{ json: { request_id, what: String(what).slice(0, 500), execution: $exec
     f.link(audit_grant, notify, 0)
     f.link(audit_grant, err, 1)
     f.link(err, ops)
+    f.layout(
+        {
+            # lane 0: intake (rules)
+            "Access request created": (0, 0),
+            "Verify signature & payload": (1, 0),
+            "Valid event?": (2, 0),
+            "Accept (202)": (3, 0),
+            "Reject (401)": (3, 1),
+            "Service token": (4, 0),
+            "Re-read request": (5, 0),
+            "Plan approval chain": (6, 0),
+            "Route": (7, 0),
+            "Already decided": (8, 0),
+            # lane 2: stage 1, lane 3: stage 2 (humans)
+            **{
+                f"{name} (stage {s})": (c, 1 + s)
+                for s in (1, 2)
+                for c, name in enumerate(["Sign links", "E-mail approver", "Wait for decision", "Verify vote"], start=3)
+            },
+            "Stage 1 outcome": (7, 2),
+            "Stage 2 outcome": (7, 3),
+            # lane 4: decision and grant (system)
+            "Final decision": (0, 4),
+            "Fresh service token": (1, 4),
+            "Record decision in catalog": (2, 4),
+            "Approved?": (3, 4),
+            "Find requester in IdP": (4, 4),
+            "Ensure role exists": (5, 4),
+            "Get role": (6, 4),
+            "Grant role to requester": (7, 4),
+            "Audit: access granted": (8, 4),
+            "Notify requester": (9, 4),
+            # lane 5: error branch
+            "Describe failure": (8, 5),
+            "Alert platform ops": (9, 5),
+        }
+    )
+    return f.to_json({"errorWorkflow": error_workflow_id()})
+
+
+# --------------------------------------------------------------------------- workflow B
+
+REVIEW_SIGN_JS = """
+// [rule] Signed Accept / Reject links for the reviewer (same scheme as workflow A).
+const crypto = require('crypto');
+const g = $('Decision gate').first().json;
+const reviewer = $env.NORDLYS_REVIEWER_EMAIL;
+// The chosen domain is part of the signature, so it cannot be edited in the link either.
+const sign = (d, dom) => crypto.createHmac('sha256', $env.NORDLYS_LINK_SIGNING_SECRET)
+  .update([$execution.id, 'review', reviewer, d, dom].join('|')).digest('hex');
+const base = $execution.resumeUrl;
+const link = (d, dom = '') => `${base}${base.includes('?') ? '&' : '?'}reviewer=${encodeURIComponent(reviewer)}&decision=${d}&domain=${dom}&sig=${sign(d, dom)}`;
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const c = g.check, ai = g.ai;
+const aiBlock = ai.available
+  ? `<p><b>AI suggestion</b> (${esc(ai.model)}, advisory only): domain <b>${esc(ai.classification.domain)}</b>
+     (${Math.round(ai.classification.domain_confidence * 100)}%), owner <b>${esc(ai.classification.owner_team)}</b>
+     (${Math.round(ai.classification.owner_confidence * 100)}%), doc quality ${ai.classification.doc_quality}/5.<br>
+     ${esc(ai.classification.summary)}<br>Gaps: ${esc((ai.classification.doc_gaps || []).join('; '))}</p>`
+  : `<p><b>AI suggestion unavailable</b>: ${esc(ai.reason)}. Review manually.</p>`;
+return [{ json: { reviewer, html: `
+  <p><b>${esc(c.title)}</b> (${esc(c.api_id)} v${c.major_version}) submitted by ${esc(g.submitted_by)}.</p>
+  <p>Proposed: domain <b>${esc(g.proposal.domain)}</b>, owner <b>${esc(g.proposal.owner_team)}</b>.</p>
+  <p><b>Why you are asked:</b></p><ul>${g.review_reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+  <p><b>Checks (deterministic):</b> description coverage ${Math.round(c.description_coverage * 100)}%,
+     content warnings: ${esc(c.content_warnings.join(', ') || 'none')},
+     possible duplicates (>= 30% shared endpoints): ${esc(c.duplicates.filter((d) => d.endpoint_overlap >= 0.3).map((d) => `${d.api_id} v${d.major_version} (${Math.round(d.endpoint_overlap * 100)}%)`).join(', ') || 'none')};
+     closest existing API by search: ${esc((c.duplicates.find((d) => d.search_rank === 1) || {}).api_id || 'n/a')}.</p>
+  ${aiBlock}
+  ${g.proposal.domain !== 'unknown'
+    ? `<p><a href="${link('accepted', g.proposal.domain)}">Accept as proposed</a> &nbsp;|&nbsp; <a href="${link('rejected')}">Reject</a></p>`
+    : `<p>No domain could be determined. Accept into domain:</p><p>${c.known_domains.map((d) =>
+        `<a href="${link('accepted', d)}">${esc(d)}</a>`).join(' &nbsp;|&nbsp; ')}</p><p><a href="${link('rejected')}">Reject</a></p>`}` } }];
+"""
+
+REVIEW_VERIFY_JS = """
+// [rule] Verify the reviewer's link. Timeout -> rejected (expired). Bad signature -> ops.
+const crypto = require('crypto');
+const q = ($json.query) || {};
+if (!q.decision) return [{ json: { route: 1, outcome: 'expired', reviewer: null } }];
+const dom = q.domain || '';
+const expected = crypto.createHmac('sha256', $env.NORDLYS_LINK_SIGNING_SECRET)
+  .update([$execution.id, 'review', q.reviewer, q.decision, dom].join('|')).digest('hex');
+const known = $('Deterministic checks (catalog)').first().json.known_domains;
+const ok = typeof q.sig === 'string' && q.sig.length === expected.length &&
+  crypto.timingSafeEqual(Buffer.from(q.sig), Buffer.from(expected)) && q.reviewer === $env.NORDLYS_REVIEWER_EMAIL
+  && (q.decision !== 'accepted' || known.includes(dom));
+if (!ok) return [{ json: { route: 2, outcome: 'invalid', reviewer: null, vote: 'invalid', reason: 'review link signature invalid' } }];
+// 0 = publish, 1 = reject, 2 = invalid
+return [{ json: { route: q.decision === 'accepted' ? 0 : 1, outcome: q.decision, reviewer: q.reviewer, domain: dom || null } }];
+"""
+
+
+def registration_workflow() -> JSON:
+    f = Flow("B · New API registration (agent + human review)", "api-registration")
+
+    def p(col: int, row: int = 0) -> tuple[int, int]:
+        return (col * 260, row * 180)
+
+    hook = f.node(
+        "API registration submitted",
+        "n8n-nodes-base.webhook",
+        2.1,
+        p(0),
+        {"httpMethod": "POST", "path": "api-registration", "responseMode": "responseNode", "options": {}},
+        webhookId=_id(f.slug, "webhook"),
+        notes="[trigger] Portal or CI pipeline submits an OpenAPI spec",
+        notesInFlow=True,
+    )
+    intake = f.code(
+        "Authenticate & read submission",
+        p(1),
+        """
+// [rule] Shared API key (constant-time compare), required fields, size limit.
+const crypto = require('crypto');
+const item = $input.first().json;
+const key = String((item.headers || {})['x-api-key'] || '');
+const expected = String($env.NORDLYS_REGISTRATION_API_KEY || '');
+const authOk = key.length === expected.length && expected.length > 0 &&
+  crypto.timingSafeEqual(Buffer.from(key), Buffer.from(expected));
+const b = item.body || {};
+const okShape = typeof b.spec === 'string' && b.spec.length > 10 && b.spec.length <= 512 * 1024
+  && typeof b.submitted_by === 'string' && /^[^@\\s]+@[^@\\s]+$/.test(b.submitted_by);
+return [{ json: { ok: authOk && okShape, status: !authOk ? 401 : 400,
+  reason: !authOk ? 'invalid API key' : !okShape ? 'need spec (string) and submitted_by (e-mail)' : 'ok',
+  spec: okShape ? b.spec : null, submitted_by: okShape ? b.submitted_by : null } }];
+""",
+        "[rule] API key, schema, size",
+    )
+    ok = f.if_true("Accepted?", p(2), "={{ $json.ok }}", "[rule]")
+    refuse = f.node(
+        "Refuse submission",
+        "n8n-nodes-base.respondToWebhook",
+        1.5,
+        p(3, 1),
+        {
+            "respondWith": "json",
+            "responseBody": '={{ { "error": $json.reason } }}',
+            "options": {"responseCode": "={{ $json.status }}"},
+        },
+    )
+    ack = f.node(
+        "Acknowledge (202)",
+        "n8n-nodes-base.respondToWebhook",
+        1.5,
+        p(3),
+        {
+            "respondWith": "json",
+            "responseBody": '={{ { "accepted": true, "tracking_id": $execution.id } }}',
+            "options": {"responseCode": 202},
+        },
+    )
+    token = f.http(
+        "Service token",
+        p(4),
+        method="POST",
+        url="={{ $env.NORDLYS_TOKEN_URL }}",
+        form=[
+            ("grant_type", "client_credentials"),
+            ("client_id", "={{ $env.NORDLYS_N8N_CLIENT_ID }}"),
+            ("client_secret", "={{ $env.NORDLYS_N8N_CLIENT_SECRET }}"),
+        ],
+        note="[system]",
+    )
+    checks = f.http(
+        "Deterministic checks (catalog)",
+        p(5),
+        method="POST",
+        url="={{ $env.NORDLYS_CATALOG_URL }}/v1/registrations/validate",
+        headers=[("Authorization", "=Bearer {{ $('Service token').first().json.access_token }}")],
+        json_body='={{ { "spec": $("Authenticate & read submission").first().json.spec } }}',
+        note="[rule] OpenAPI 3.1, metadata, coverage, injection scan, duplicates, version",
+    )
+    valid = f.if_true("Spec valid?", p(6), "={{ $json.valid }}", "[rule]")
+    ai = f.http(
+        "AI classification (agent)",
+        p(7),
+        method="POST",
+        url="={{ $env.NORDLYS_AGENT_URL }}/v1/classify-registration",
+        headers=[("Authorization", "=Bearer {{ $('Service token').first().json.access_token }}")],
+        json_body='={{ { "check": $("Deterministic checks (catalog)").first().json } }}',
+        note="[AI] domain, owner, doc critique + confidence (advisory)",
+    )
+    gate = f.code(
+        "Decision gate",
+        p(8),
+        """
+// [rule] The gate is deterministic. The AI suggests; rules decide whether a human must look.
+// Auto-accept only when every signal agrees and nothing is risky.
+const c = $('Deterministic checks (catalog)').first().json;
+const ai = $json;
+const sub = $('Authenticate & read submission').first().json;
+const cls = ai.available ? ai.classification : null;
+const reasons = [];
+if (c.version_exists) {
+  return [{ json: { route: 2, reject_reason: `${c.api_id} v${c.major_version} already exists - bump the major version`,
+    check: c, ai, submitted_by: sub.submitted_by } }];
+}
+if (!cls) reasons.push(`AI step unavailable (${ai.reason || 'no model'})`);
+if (cls && cls.domain_confidence < 0.8) reasons.push(`AI domain confidence ${Math.round(cls.domain_confidence * 100)}% < 80%`);
+if (cls && cls.owner_confidence < 0.8) reasons.push(`AI owner confidence ${Math.round(cls.owner_confidence * 100)}% < 80%`);
+if (cls && c.declared_domain && cls.domain !== c.declared_domain) reasons.push(`AI says ${cls.domain}, spec declares ${c.declared_domain}`);
+if (cls && cls.owner_team === 'unknown' && !c.declared_owner_team) reasons.push('no owner team identified');
+if (cls && cls.doc_quality <= 2) reasons.push(`AI rates documentation ${cls.doc_quality}/5`);
+if (cls && cls.notes) reasons.push(`AI notes: ${cls.notes}`);
+if (c.content_warnings.length) reasons.push(`content warnings (possible prompt injection): ${c.content_warnings.join(', ')}`);
+if (c.description_coverage < 0.8) reasons.push(`only ${Math.round(c.description_coverage * 100)}% of operations documented`);
+for (const d of c.duplicates) {
+  if (d.endpoint_overlap >= 0.5) reasons.push(`possible duplicate of ${d.api_id} v${d.major_version} (${Math.round(d.endpoint_overlap * 100)}% endpoint overlap)`);
+}
+const proposal = {
+  domain: c.declared_domain || (cls ? cls.domain : 'unknown'),
+  owner_team: c.declared_owner_team || (cls && cls.owner_team !== 'unknown' ? cls.owner_team : 'api-governance'),
+};
+if (proposal.domain === 'unknown') reasons.push('no domain identified');
+// 0 = auto-accept, 1 = human review, 2 = reject
+return [{ json: { route: reasons.length ? 1 : 0, review_reasons: reasons, proposal, check: c, ai,
+  submitted_by: sub.submitted_by } }];
+""",
+        "[rule] combine AI + rules -> auto / review / reject",
+    )
+    route = f.switch("Route", p(9), "={{ $json.route }}", 3, "[rule] 0 auto · 1 review · 2 reject")
+    sign = f.code("Prepare review", p(10, 1), REVIEW_SIGN_JS, "[rule] signed review links")
+    mail = f.email(
+        "E-mail reviewer",
+        p(11, 1),
+        to="={{ $json.reviewer }}",
+        subject="=Review API registration: {{ $('Decision gate').first().json.check.title }}",
+        html="={{ $json.html }}",
+        note="[human] API governance reviews",
+    )
+    wait = f.node(
+        "Wait for review",
+        "n8n-nodes-base.wait",
+        1.1,
+        p(12, 1),
+        {
+            "resume": "webhook",
+            "httpMethod": "GET",
+            "responseMode": "onReceived",
+            "limitWaitTime": True,
+            "limitType": "afterTimeInterval",
+            "resumeAmount": "={{ Number($env.NORDLYS_REVIEW_TIMEOUT_MINUTES || 4320) }}",
+            "resumeUnit": "minutes",
+            "options": {"responseData": "Thank you - your review was received."},
+        },
+        webhookId=_id(f.slug, "wait"),
+        notes="[human] Pauses until a link is clicked or the timeout",
+        notesInFlow=True,
+    )
+    verify = f.code("Verify review", p(13, 1), REVIEW_VERIFY_JS, "[rule] signature + timeout")
+    review_route = f.switch(
+        "Review outcome", p(14, 1), "={{ $json.route }}", 3, "[rule] 0 publish · 1 reject · 2 invalid"
+    )
+    fresh = f.http(
+        "Fresh service token",
+        p(15, 0),
+        method="POST",
+        url="={{ $env.NORDLYS_TOKEN_URL }}",
+        form=[
+            ("grant_type", "client_credentials"),
+            ("client_id", "={{ $env.NORDLYS_N8N_CLIENT_ID }}"),
+            ("client_secret", "={{ $env.NORDLYS_N8N_CLIENT_SECRET }}"),
+        ],
+        note="[system] tokens expire while humans review",
+    )
+    publish = f.http(
+        "Publish to catalog",
+        p(16, 0),
+        method="POST",
+        url="={{ $env.NORDLYS_CATALOG_URL }}/v1/registrations",
+        headers=[("Authorization", "=Bearer {{ $json.access_token }}")],
+        json_body='={{ { "spec": $("Authenticate & read submission").first().json.spec, '
+        '"domain": $("Decision gate").first().json.route === 0 ? $("Decision gate").first().json.proposal.domain : $("Verify review").first().json.domain, '
+        '"owner_team": $("Decision gate").first().json.proposal.owner_team, '
+        '"submitted_by": $("Decision gate").first().json.submitted_by, '
+        '"decision": $("Decision gate").first().json.route === 0 ? "auto_accepted" : "human_approved", '
+        '"reviewed_by": $("Decision gate").first().json.route === 0 ? null : $("Verify review").first().json.reviewer } }}',
+        note="[system] write spec + ingest (embeddings, search) + audit",
+    )
+    published = f.email(
+        "Tell submitter: published",
+        p(17, 0),
+        to="={{ $('Decision gate').first().json.submitted_by }}",
+        subject="=Your API {{ $('Publish to catalog').first().json.api_id }} v{{ $('Publish to catalog').first().json.major_version }} is in the catalog",
+        html="=<p>Published as <b>{{ $('Publish to catalog').first().json.api_id }}</b> "
+        "v{{ $('Publish to catalog').first().json.major_version }} in domain "
+        "{{ $('Decision gate').first().json.proposal.domain }}, owned by {{ $('Decision gate').first().json.proposal.owner_team }}.</p>"
+        "<p>Decision: {{ $('Decision gate').first().json.route === 0 ? 'automatically accepted (all checks passed)' : 'approved by ' + $('Verify review').first().json.reviewer }}.</p>",
+        note="[system]",
+    )
+    rejected = f.email(
+        "Tell submitter: not published",
+        p(16, 2),
+        to="={{ $('Decision gate').first().json.submitted_by }}",
+        subject="=Your API registration was not published",
+        html="=<p>Your registration of <b>{{ $('Decision gate').first().json.check.title }}</b> was not published.</p>"
+        "<p>{{ $('Decision gate').first().json.reject_reason || ($json.outcome === 'expired' ? 'No review decision within the review period.' : 'Rejected by the API governance reviewer.') }}</p>",
+        note="[system]",
+    )
+    invalid = f.email(
+        "Tell submitter: invalid spec",
+        p(7, 2),
+        to="={{ $('Authenticate & read submission').first().json.submitted_by }}",
+        subject="=Your OpenAPI spec could not be registered",
+        html="=<p>The specification failed validation:</p><ul>{{ $json.errors.map(e => '<li>' + e.replace(/</g, '&lt;') + '</li>').join('') }}</ul>",
+        note="[rule] fail fast, no AI call needed",
+    )
+    err = f.code(
+        "Describe failure",
+        p(17, 3),
+        """
+// [rule] Any failed call ends here. Nothing is published by a failed run.
+const input = $input.first().json;
+const what = input.vote === 'invalid' ? input.reason
+  : (input.error && (input.error.message || JSON.stringify(input.error))) || 'unknown error';
+return [{ json: { what: String(what).slice(0, 500), execution: $execution.id } }];
+""",
+        "[rule] error branch",
+    )
+    ops = f.email(
+        "Alert platform ops",
+        p(18, 3),
+        to="={{ $env.NORDLYS_OPS_EMAIL }}",
+        subject="=API registration workflow needs attention ({{ $json.execution }})",
+        html="=<p>{{ $json.what }}</p><p>n8n execution {{ $json.execution }}. Nothing was published.</p>",
+        note="[human]",
+    )
+
+    f.link(hook, intake)
+    f.link(intake, ok)
+    f.link(ok, ack, 0)
+    f.link(ok, refuse, 1)
+    f.link(ack, token)
+    f.link(token, checks, 0)
+    f.link(token, err, 1)
+    f.link(checks, valid, 0)
+    f.link(checks, err, 1)
+    f.link(valid, ai, 0)
+    f.link(valid, invalid, 1)
+    f.link(ai, gate, 0)
+    f.link(ai, err, 1)
+    f.link(gate, route)
+    f.link(route, fresh, 0)
+    f.link(route, sign, 1)
+    f.link(route, rejected, 2)
+    f.link(sign, mail)
+    f.link(mail, wait)
+    f.link(wait, verify)
+    f.link(verify, review_route)
+    f.link(review_route, fresh, 0)
+    f.link(review_route, rejected, 1)
+    f.link(review_route, err, 2)
+    f.link(fresh, publish, 0)
+    f.link(fresh, err, 1)
+    f.link(publish, published, 0)
+    f.link(publish, err, 1)
+    f.link(err, ops)
+    f.layout(
+        {
+            "API registration submitted": (0, 0),
+            "Authenticate & read submission": (1, 0),
+            "Accepted?": (2, 0),
+            "Acknowledge (202)": (3, 0),
+            "Refuse submission": (3, 1),
+            "Service token": (4, 0),
+            "Deterministic checks (catalog)": (5, 0),
+            "Spec valid?": (6, 0),
+            "Tell submitter: invalid spec": (7, 1),
+            "AI classification (agent)": (7, 0),
+            "Decision gate": (8, 0),
+            "Route": (9, 0),
+            "Prepare review": (3, 2),
+            "E-mail reviewer": (4, 2),
+            "Wait for review": (5, 2),
+            "Verify review": (6, 2),
+            "Review outcome": (7, 2),
+            "Tell submitter: not published": (9, 2),
+            "Fresh service token": (7, 3),
+            "Publish to catalog": (8, 3),
+            "Tell submitter: published": (9, 3),
+            "Describe failure": (8, 4),
+            "Alert platform ops": (9, 4),
+        }
+    )
     return f.to_json({"errorWorkflow": error_workflow_id()})
 
 
@@ -639,6 +1031,7 @@ def error_handler_workflow() -> JSON:
 
 WORKFLOWS = {
     "access-request-approval.json": access_request_workflow,
+    "api-registration.json": registration_workflow,
     "error-handler.json": error_handler_workflow,
 }
 

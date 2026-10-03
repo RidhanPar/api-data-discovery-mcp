@@ -25,7 +25,11 @@ dependencies = [
 
 [project.optional-dependencies]
 azure = [
+    "azure-identity>=1.17",
     "openai>=1.40",
+]
+anthropic = [
+    "anthropic>=0.40",
 ]
 
 [dependency-groups]
@@ -36,6 +40,7 @@ dev = [
     "types-pyyaml>=6.0",
     "testcontainers[postgres]>=4.8",
     "httpx>=0.27",
+    "playwright>=1.47",
 ]
 
 [build-system]
@@ -71,5 +76,5 @@ markers = ["integration: needs Postgres with pgvector (testcontainers or NORDLYS
 pythonpath = ["."]
 
 [[tool.mypy.overrides]]
-module = ["onnxruntime.*", "testcontainers.*"]
+module = ["onnxruntime.*", "testcontainers.*", "demo_access_flow"]
 ignore_missing_imports = true

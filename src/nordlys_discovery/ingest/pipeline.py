@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -221,17 +222,32 @@ def _embed_pending(session: Session, embedder: EmbeddingProvider, report: Ingest
 
 
 def ingest_catalog(
-    session: Session, catalog_dir: Path, embedder: EmbeddingProvider, *, prune: bool = True
+    session: Session,
+    catalog_dir: Path,
+    embedder: EmbeddingProvider,
+    *,
+    prune: bool = True,
+    extra_roots: Sequence[Path] = (),
 ) -> IngestReport:
+    """Ingest `catalog_dir` plus any `extra_roots` (e.g. APIs registered through Workflow B).
+
+    Each root has the same layout (apis/**, data-products/*). Pruning considers all roots
+    together, so a full re-ingest never deletes a registered API.
+    """
     started = time.perf_counter()
     report = IngestReport(embedding_model=embedder.model_id)
     # Serialise concurrent ingestion runs (e.g. two replicas starting at once).
     session.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": INGEST_LOCK_ID})
 
+    roots = [(catalog_dir, "")] + [(r, f"{r.name}/") for r in extra_roots if r.exists()]
     failed_paths: set[str] = set()
     seen_apis: set[tuple[str, int]] = set()
-    for path in sorted((catalog_dir / "apis").rglob("*.yaml")):
-        rel = str(path.relative_to(catalog_dir))
+    api_files = [
+        (p, prefix + str(p.relative_to(root)))
+        for root, prefix in roots
+        for p in sorted((root / "apis").rglob("*.yaml"))
+    ]
+    for path, rel in api_files:
         try:
             with session.begin_nested():
                 _ingest_api(session, path, rel, report, seen_apis)
@@ -241,8 +257,12 @@ def ingest_catalog(
             log.warning("skipping invalid spec", extra={"path": rel, "error": str(exc)})
 
     seen_products: set[str] = set()
-    for path in sorted((catalog_dir / "data-products").glob("*.yaml")):
-        rel = str(path.relative_to(catalog_dir))
+    dp_files = [
+        (p, prefix + str(p.relative_to(root)))
+        for root, prefix in roots
+        for p in sorted((root / "data-products").glob("*.yaml"))
+    ]
+    for path, rel in dp_files:
         try:
             with session.begin_nested():
                 _ingest_product(session, path, rel, report, seen_products)
