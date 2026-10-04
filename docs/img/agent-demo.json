@@ -1,0 +1,67 @@
+{
+  "question": "Which API gives me open claims for Norway, and how do I get access?",
+  "answer": "Use **claims-search-api v1** with the endpoint **GET /claims**. It's active, not deprecated, and it covers Norway. You don't have access yet: you'll need the `claims.search` scope.\n\n## How to get open claims in Norway\n```\nGET https://api.nordlys.example/claims-search/v1/claims?status=open&country=NO\n```\n- **`status=open`** returns every claim that isn't finished yet: `registered`, `open`, `in_assessment`, `awaiting_documents` and `reopened`.\n- **Other optional filters:** `productLine`, `reportedFrom` / `reportedTo` (dates), `lossCause`.\n- **Paging:** `limit` sets the page size (1\u2013200, default 50). To get the next page, pass the `nextCursor` value from the last response as `cursor`. On the last page, `nextCursor` is null.\n- **What you get back:** short claim summaries with `claimId`, `claimNumber`, `status`, `country`, `productLine`, `lossDate`, `reportedAt` and `reserve` (amount + currency).\n- **Full claim details:** the search API only returns summaries. Use the claims-api v2 endpoint `GET /claims/{claimId}`. That API needs its own access, which I haven't checked.\n- **Delay:** results can be up to 60 seconds behind the claims system.\n- **If you only need counts:** use **GET /claims/aggregations** in the same API, with the same scope.\n- **Test server:** `https://api.test.nordlys.example/claims-search/v1`.\n\nDon't use claim-lookup-api v1 for this. It only returns the claims of the customer in the access token, not all claims in a market.\n\n## Access\n- **Your status:** no access yet. You're missing the `claims.search` scope (OAuth2).\n- **Data classification:** personal. Only use it for a legitimate business purpose.\n- **Approval:** the owning team approves requests. The approver is **team:claims-platform**, and they review both the request and your purpose.\n- **Next step:** file an access request for `claims.search` on claims-search-api v1. Include your purpose and a short justification. It stays pending until claims-platform approves it. I can't request or grant access for you.",
+  "citations": [
+    {
+      "asset_type": "api",
+      "asset_id": "claims-search-api",
+      "version": 1,
+      "endpoint": "GET /claims"
+    }
+  ],
+  "refused": false,
+  "ungrounded_citations": [],
+  "stop": "final_answer",
+  "model": "anthropic:claude-opus-5-5",
+  "steps": 4,
+  "tool_calls": [
+    {
+      "name": "search_catalog",
+      "arguments": {
+        "query": "open claims",
+        "country": "NO",
+        "asset_type": "api"
+      },
+      "ok": true,
+      "ms": 93.8,
+      "error": null
+    },
+    {
+      "name": "get_api_details",
+      "arguments": {
+        "api_id": "claims-search-api",
+        "version": 1
+      },
+      "ok": true,
+      "ms": 29.0,
+      "error": null
+    },
+    {
+      "name": "get_endpoint_schema",
+      "arguments": {
+        "api_id": "claims-search-api",
+        "version": 1,
+        "method": "GET",
+        "path": "/claims"
+      },
+      "ok": true,
+      "ms": 17.6,
+      "error": null
+    },
+    {
+      "name": "check_access",
+      "arguments": {
+        "asset_type": "api",
+        "asset_id": "claims-search-api",
+        "version": 1
+      },
+      "ok": true,
+      "ms": 20.4,
+      "error": null
+    }
+  ],
+  "input_tokens": 32584,
+  "output_tokens": 2039,
+  "latency_ms": 22735.6,
+  "error": null
+}

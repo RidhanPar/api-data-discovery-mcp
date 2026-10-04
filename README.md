@@ -12,6 +12,12 @@ Desktop, VS Code, an internal agent) gets the same tools and the same guard rail
 > Nordlys Insurance, its APIs, teams, people and data are invented. Hostnames use the
 > reserved `.example` domain.
 
+![The discovery agent answering "Which API gives me open claims for Norway, and how do I get access?" with four MCP tool calls and a grounded citation](docs/img/agent-demo.gif)
+
+*A real agent run (claude-opus-5-5 through the MCP server), replayed faster than real time. The
+run is saved next to the GIF in [docs/img/agent-demo.json](docs/img/agent-demo.json); regenerate both with
+`uv run python -m scripts.demo_gif` (needs Postgres and an LLM).*
+
 ## The problem
 
 A mid-sized insurer has hundreds of APIs and datasets spread over teams and markets.
@@ -357,7 +363,6 @@ docs/               security, n8n, Azure, observability, MCP clients, ADRs, imag
 * No agent numbers yet; they need LLM credentials (see above).
 * The LLM judge, when enabled, uses the same provider as the agent; the spot-check file
   is there for a human to review.
-* No demo GIF: it is supposed to show the agent answering, which needs an LLM.
 * Azure has been validated offline, not applied to a subscription. Expect first-apply
   fixes (model quota per region, Mailpit's TCP host name).
 * The cost estimate has not been run.
