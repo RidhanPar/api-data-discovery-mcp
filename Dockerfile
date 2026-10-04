@@ -14,11 +14,11 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=secret,id=ca_bundle,required=false \
     if [ -f /run/secrets/ca_bundle ]; then export SSL_CERT_FILE=/run/secrets/ca_bundle; fi; \
-    uv sync --frozen --no-dev --no-install-project --extra azure
+    uv sync --frozen --no-dev --no-install-project --extra azure --extra anthropic
 COPY src ./src
 RUN --mount=type=secret,id=ca_bundle,required=false \
     if [ -f /run/secrets/ca_bundle ]; then export SSL_CERT_FILE=/run/secrets/ca_bundle; fi; \
-    uv sync --frozen --no-dev --no-editable --extra azure
+    uv sync --frozen --no-dev --no-editable --extra azure --extra anthropic
 
 FROM python:3.12-slim
 RUN useradd --system --uid 10001 --home /app app \
