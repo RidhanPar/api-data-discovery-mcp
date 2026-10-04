@@ -60,3 +60,8 @@ questions to re-run.
 **Partial re-runs.** `--only q30,q31` merges into the existing result file for the same
 model: the re-run questions replace their old rows and the rest are kept. `subset` says
 `full` once every question has a row, otherwise `partial: n of 45 questions`.
+
+**Re-scoring saved runs.** `uv run python -m eval.rescore RUN.json [RUN.json ...]` scores the
+answers saved in each run's `-answers.jsonl` again with the current scorer, without calling
+the LLM, and combines runs (later files win; LLM-error answers are skipped). Tool calls,
+latency, tokens and judge scores are carried over from the run that produced each answer.

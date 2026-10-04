@@ -250,14 +250,50 @@ injection) and 4 access-restricted ones where sample values must never appear. M
 
 Definitions: [eval/README.md](eval/README.md).
 
-**Not measured yet.** The build environment has no LLM credentials, so there are no agent
-numbers yet, and I will not estimate them. The harness, the scoring rules (unit-tested)
-and the agent loop (tested with a scripted model against the real MCP server) are done.
-Every result file records the provider and model that produced it.
+Results for `anthropic:claude-opus-5-5`, all 45 questions:
+[eval/results/agent-anthropic-claude-opus-5-5.json](eval/results/agent-anthropic-claude-opus-5-5.json),
+with every answer in the `-answers.jsonl` next to it.
+
+| metric | result |
+|---|---|
+| answer hit rate | **40/40** (1.0) |
+| endpoint accuracy | 25/25 (1.0) |
+| grounded citations | 81/87 (0.931) |
+| trap cited (deprecated or look-alike) | 0/9 |
+| correct refusals (out of scope, incl. a prompt injection) | 5/5 |
+| false refusals | 0/40 |
+| policy compliance | **45/45 (100%)** |
+| LLM judge, 1-5 (same model as the agent) | 4.96 |
+| MCP tool calls per question | 3.64 |
+| latency p50 / p95 | 16.4 s / 22.6 s |
+| agent cost | $5.94 in total, about $0.13 per question (judge tokens extra) |
+
+By question type, every category scored full marks: findable API 19/19, data product 10/10,
+deprecated trap 3/3, deprecation info 1/1, near-duplicate 3/3, access-restricted 4/4,
+out of scope 5/5.
+
+**How these were produced.** The run was split in two because the API credits ran out
+after q29: [run 1](eval/results/runs/2026-10-04-anthropic/run1-q01-q29.json) answered
+q01-q29 (its q30-q45 rows are LLM errors), and
+[run 2](eval/results/runs/2026-10-04-anthropic/run2-q30-q45.json) answered q30-q45 with
+`--only`. `uv run python -m eval.rescore <run 1> <run 2>` re-scores the saved answers with
+the current scorer and combines them, without calling the LLM. To measure again from
+scratch: `make eval-agent`.
+
+**What to read into it.**
+
+* The 6 ungrounded citations are real endpoints (mostly claims-api v2 `GET /claims/{claimId}`)
+  that the agent named as a "see also" without a tool returning them. The primary
+  recommendation was always grounded.
+* q40 (fraud scores for a marketing campaign) counts as a hit because the agent checked
+  access for that purpose and declined it; the scorer accepts a justified decline for
+  prohibited-purpose questions ([eval/README.md](eval/README.md)).
+* 45 questions written by one person is a small set, and the judge is the same model as
+  the agent, so the judge score is a sanity signal, not independent evidence.
 
 ### Tests
 
-`make test`: **224 tests**, all passing. They cover:
+`make test`: **228 tests**, all passing. They cover:
 
 * unit tests and integration tests (real Postgres + pgvector via testcontainers; JWTs
   signed with a test key served as JWKS);
@@ -360,9 +396,10 @@ docs/               security, n8n, Azure, observability, MCP clients, ADRs, imag
 
 **Not done or not measured:**
 
-* No agent numbers yet; they need LLM credentials (see above).
-* The LLM judge, when enabled, uses the same provider as the agent; the spot-check file
-  is there for a human to review.
+* Agent results come from one model (claude-opus-5-5); no other model or provider has
+  been measured yet.
+* The LLM judge uses the same model as the agent, and no human spot check of the saved
+  answers has been recorded yet.
 * Azure has been validated offline, not applied to a subscription. Expect first-apply
   fixes (model quota per region, Mailpit's TCP host name).
 * The cost estimate has not been run.
