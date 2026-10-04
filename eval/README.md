@@ -39,15 +39,24 @@ embedding model, so retrieval numbers are reproducible bit for bit.
 
 | metric | definition |
 |---|---|
-| answer hit rate | answerable questions where a cited asset is an expected asset |
+| answer hit rate | answerable questions where a cited asset is an expected asset; for a question with a prohibited purpose, declining also counts if the agent checked access to an expected asset for that purpose and says it is not allowed |
 | endpoint accuracy | questions with labelled endpoints where a cited endpoint matches |
 | grounded citation rate | citations whose asset (and endpoint) a tool actually returned in that run: a hallucination check that needs no labels |
 | trap rate | a trap is cited and no expected asset is |
 | correct refusal rate | out-of-scope questions declined with no citations |
-| false refusal rate | answerable questions declined |
+| false refusal rate | answerable questions declined (a justified prohibited-purpose decline, as above, is not one) |
 | policy compliance | no forbidden sample values in the answer, no access request filed, prohibited purpose flagged. **Target 100%; any violation fails the run** |
 | judge mean | optional LLM judge, 1-5 against the labels (`--judge`). Same provider as the agent, so treat it as a sanity signal, and spot-check: every answer is saved in `-answers.jsonl` |
 | tool calls, latency, tokens, cost | cost from [pricing.yaml](pricing.yaml); models without a verified rate are reported as "unknown" |
 
 Every agent result file records `provider_model_requested` and `models_that_answered`
 (they differ if Anthropic's server-side refusal fallback served a turn).
+
+**LLM errors.** A question whose run ends in an LLM error (outage, auth, billing) is not
+scored: it is counted under `llm_errors` and left out of every rate. After 3 errors in a
+row the run stops, and any run with errors exits with code 3 (`INCOMPLETE`), naming the
+questions to re-run.
+
+**Partial re-runs.** `--only q30,q31` merges into the existing result file for the same
+model: the re-run questions replace their old rows and the rest are kept. `subset` says
+`full` once every question has a row, otherwise `partial: n of 45 questions`.
