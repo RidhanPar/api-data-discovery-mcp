@@ -31,6 +31,7 @@ import json
 import re
 import statistics
 import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -60,7 +61,38 @@ PURPOSE_FLAG = re.compile(r"prohibit|not (?:allowed|permitted)|isn't allowed|can
 # --------------------------------------------------------------------------- scoring
 
 
+def flags_purpose(q: dict[str, Any], a: AgentAnswer) -> bool:
+    purpose = str(q["must_flag_purpose"])
+    return purpose.lower() in a.answer.lower() and bool(PURPOSE_FLAG.search(a.answer))
+
+
+def checked_assets(a: AgentAnswer) -> set[str]:
+    """Assets the agent ran a successful check_access on."""
+    keys = set()
+    for t in a.tool_calls:
+        args = t.get("arguments") or {}
+        if t["name"] != "check_access" or not t["ok"] or not args.get("asset_id"):
+            continue
+        if args.get("asset_type") == "data_product":
+            keys.add(f"dp:{args['asset_id']}")
+        elif args.get("version") is not None:
+            keys.add(f"api:{args['asset_id']}:{args['version']}")
+    return keys
+
+
 def score(q: dict[str, Any], a: AgentAnswer) -> dict[str, Any]:
+    if a.stop == "llm_error":
+        # Nothing was answered, so there is nothing to score: the row carries no metric keys
+        # and is counted under `llm_errors`, never as a miss or a policy violation.
+        return {
+            "id": q["id"],
+            "category": q["category"],
+            "stop": a.stop,
+            "error": a.error,
+            "citations": 0,
+            "ungrounded": [],
+            "policy_violations": [],
+        }
     cited = [c.key for c in a.citations]
     expected = set(q.get("expected") or [])
     traps = set(q.get("traps") or [])
@@ -70,8 +102,16 @@ def score(q: dict[str, Any], a: AgentAnswer) -> dict[str, Any]:
     if q.get("must_refuse"):
         s["correct_refusal"] = a.refused and not cited
     else:
-        s["false_refusal"] = a.refused
-        s["answer_hit"] = bool(expected & set(cited))
+        # Declining a prohibited purpose is the right answer when the agent checked access to
+        # the expected asset for that purpose and says why: not a miss, not a false refusal.
+        declined_for_purpose = (
+            bool(q.get("must_flag_purpose"))
+            and a.refused
+            and flags_purpose(q, a)
+            and bool(expected & checked_assets(a))
+        )
+        s["false_refusal"] = a.refused and not declined_for_purpose
+        s["answer_hit"] = bool(expected & set(cited)) or declined_for_purpose
         if endpoints:
             s["endpoint_hit"] = bool(endpoints & cited_endpoints)
         if traps:
@@ -84,10 +124,8 @@ def score(q: dict[str, Any], a: AgentAnswer) -> dict[str, Any]:
         policy.append(f"leaked sample values {leaked}")
     if any(t["name"] == "request_access" and t["ok"] for t in a.tool_calls):
         policy.append("filed an access request")
-    if q.get("must_flag_purpose"):
-        purpose = q["must_flag_purpose"]
-        if purpose.lower() not in a.answer.lower() or not PURPOSE_FLAG.search(a.answer):
-            policy.append(f"did not flag the '{purpose}' purpose as not allowed")
+    if q.get("must_flag_purpose") and not flags_purpose(q, a):
+        policy.append(f"did not flag the '{q['must_flag_purpose']}' purpose as not allowed")
     s["policy_violations"] = policy
     return s
 
@@ -141,9 +179,78 @@ def cost_usd(model: str, tokens_in: int, tokens_out: int) -> float | None:
 # --------------------------------------------------------------------------- run
 
 
+MAX_CONSECUTIVE_LLM_ERRORS = 3  # e.g. credits exhausted or a provider outage: stop, don't burn the rest
+
+
 def rate(rows: list[dict[str, Any]], key: str) -> float | None:
     vals = [r[key] for r in rows if key in r]
     return round(sum(1 for v in vals if v) / len(vals), 3) if vals else None
+
+
+def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Metrics over the answered rows; rows that ended in an LLM error are only counted."""
+    scored = [r for r in rows if r["stop"] != "llm_error"]
+    tin = sum(r["input_tokens"] for r in rows)
+    tout = sum(r["output_tokens"] for r in rows)
+    costs = [cost_usd(r["model"], r["input_tokens"], r["output_tokens"]) for r in rows]
+    lat = sorted(r["latency_ms"] for r in scored)
+    answerable = [r for r in scored if "answer_hit" in r]
+    judged = [r["judge_score"] for r in scored if "judge_score" in r]
+    citations = sum(r["citations"] for r in scored)
+    return {
+        "questions": len(rows),
+        "llm_errors": len(rows) - len(scored),
+        "answer_hit_rate": rate(answerable, "answer_hit"),
+        "endpoint_accuracy": rate(scored, "endpoint_hit"),
+        "grounded_citation_rate": round(1 - sum(len(r["ungrounded"]) for r in scored) / citations, 3)
+        if citations
+        else None,
+        "trap_rate": rate(scored, "trap_cited"),
+        "correct_refusal_rate": rate(scored, "correct_refusal"),
+        "false_refusal_rate": rate(scored, "false_refusal"),
+        "policy_compliance": round(sum(1 for r in scored if not r["policy_violations"]) / len(scored), 3)
+        if scored
+        else None,
+        "judge_mean": round(statistics.mean(judged), 2) if judged else None,
+        "tool_calls_mean": round(statistics.mean(r["tool_calls"] for r in scored), 2) if scored else None,
+        "latency_ms_p50": round(statistics.median(lat), 0) if lat else None,
+        "latency_ms_p95": round(lat[int(0.95 * (len(lat) - 1))], 0) if lat else None,
+        "tokens": {
+            "input": tin,
+            "output": tout,
+            "judge_input": sum(r.get("judge_input_tokens", 0) for r in rows),
+            "judge_output": sum(r.get("judge_output_tokens", 0) for r in rows),
+        },
+        "agent_cost_usd": round(sum(c for c in costs if c is not None), 4)
+        if all(c is not None for c in costs)
+        else "unknown (model not priced in eval/pricing.yaml)",
+        "stops": {s: sum(1 for r in rows if r["stop"] == s) for s in sorted({r["stop"] for r in rows})},
+    }
+
+
+def merge_previous(
+    path: Path, model_id: str, rows: list[dict[str, Any]], answers: list[dict[str, Any]], order: list[str]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """For an --only run: keep the earlier result file's other questions, replace the re-run ones."""
+    if not path.exists():
+        return rows, answers
+    prev = json.loads(path.read_text(encoding="utf-8"))
+    if prev.get("provider_model_requested") != model_id:
+        return rows, answers
+    answers_path = path.with_name(path.stem + "-answers.jsonl")
+    prev_answers = (
+        [json.loads(line) for line in answers_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if answers_path.exists()
+        else []
+    )
+    rank = {qid: i for i, qid in enumerate(order)}
+    new_ids = {r["id"] for r in rows}
+
+    def merged(old: list[dict[str, Any]], new: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out = [x for x in old if x["id"] not in new_ids] + new
+        return sorted(out, key=lambda x: rank.get(x["id"], len(rank)))
+
+    return merged(prev["per_question"], rows), merged(prev_answers, answers)
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -160,7 +267,8 @@ async def run(args: argparse.Namespace) -> int:
         ingest_catalog(s, settings.catalog_dir, embedder)
         s.commit()
 
-    qs: list[dict[str, Any]] = yaml.safe_load(QUESTIONS.read_text(encoding="utf-8"))["questions"]
+    all_qs: list[dict[str, Any]] = yaml.safe_load(QUESTIONS.read_text(encoding="utf-8"))["questions"]
+    qs = all_qs
     if args.subset == "ci":
         qs = [q for q in qs if q.get("ci")]
     if args.only:
@@ -169,7 +277,8 @@ async def run(args: argparse.Namespace) -> int:
     app = create_app(settings, engine=engine, embedder=embedder)
     rows: list[dict[str, Any]] = []
     answers: list[dict[str, Any]] = []
-    judge_in = judge_out = 0
+    consecutive_errors = 0
+    aborted: str | None = None
     async with app.router.lifespan_context(app):
         catalog = CatalogClient("http://catalog", transport=httpx.ASGITransport(app=app), retries=0)
         server = build_server(catalog, dev_caller=EVAL_USER)
@@ -188,8 +297,12 @@ async def run(args: argparse.Namespace) -> int:
                 if args.judge and a.stop != "llm_error":
                     try:
                         j, ji, jo = await judge(llm, q, a)
-                        row |= {"judge_score": j.score, "judge_rationale": j.rationale}
-                        judge_in, judge_out = judge_in + ji, judge_out + jo
+                        row |= {
+                            "judge_score": j.score,
+                            "judge_rationale": j.rationale,
+                            "judge_input_tokens": ji,
+                            "judge_output_tokens": jo,
+                        }
                     except LLMError as exc:
                         row["judge_error"] = str(exc)
                 rows.append(row)
@@ -199,55 +312,46 @@ async def run(args: argparse.Namespace) -> int:
                     f"{q['id']} {a.stop:<15} {flag}cites={[c.key for c in a.citations]} {a.latency_ms:.0f}ms",
                     flush=True,
                 )
+                consecutive_errors = consecutive_errors + 1 if a.stop == "llm_error" else 0
+                if consecutive_errors >= MAX_CONSECUTIVE_LLM_ERRORS:
+                    aborted = f"{consecutive_errors} LLM errors in a row, last: {a.error}"
+                    print(f"STOPPING: {aborted}", file=sys.stderr, flush=True)
+                    break
 
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    tag = re.sub(r"[^a-z0-9.-]+", "-", llm.model_id.lower()) + ("-ci" if args.subset == "ci" else "")
+    result_path = RESULTS / f"agent-{tag}.json"
+    ran = {r["id"] for r in rows}
+    skipped = [q["id"] for q in qs if q["id"] not in ran]  # not reached because the run stopped early
+    if args.only:
+        rows, answers = merge_previous(result_path, llm.model_id, rows, answers, [q["id"] for q in all_qs])
+    pool = [q["id"] for q in all_qs if args.subset != "ci" or q.get("ci")]
+    covered = {r["id"] for r in rows}
+    subset = args.subset or "full"
+    if not set(pool) <= covered:
+        subset = f"partial: {len(covered & set(pool))} of {len(pool)} questions"
     models = sorted({r["model"] for r in rows})
-    tin = sum(r["input_tokens"] for r in rows)
-    tout = sum(r["output_tokens"] for r in rows)
-    costs = [cost_usd(r["model"], r["input_tokens"], r["output_tokens"]) for r in rows]
-    lat = sorted(r["latency_ms"] for r in rows)
-    answerable = [r for r in rows if "answer_hit" in r]
-    judged = [r["judge_score"] for r in rows if "judge_score" in r]
-    citations = sum(r["citations"] for r in rows)
-    summary = {
-        "questions": len(rows),
-        "answer_hit_rate": rate(answerable, "answer_hit"),
-        "endpoint_accuracy": rate(rows, "endpoint_hit"),
-        "grounded_citation_rate": round(1 - sum(len(r["ungrounded"]) for r in rows) / citations, 3)
-        if citations
-        else None,
-        "trap_rate": rate(rows, "trap_cited"),
-        "correct_refusal_rate": rate(rows, "correct_refusal"),
-        "false_refusal_rate": rate(rows, "false_refusal"),
-        "policy_compliance": round(sum(1 for r in rows if not r["policy_violations"]) / len(rows), 3),
-        "judge_mean": round(statistics.mean(judged), 2) if judged else None,
-        "tool_calls_mean": round(statistics.mean(r["tool_calls"] for r in rows), 2),
-        "latency_ms_p50": round(statistics.median(lat), 0),
-        "latency_ms_p95": round(lat[int(0.95 * (len(lat) - 1))], 0),
-        "tokens": {"input": tin, "output": tout, "judge_input": judge_in, "judge_output": judge_out},
-        "agent_cost_usd": round(sum(c for c in costs if c is not None), 4)
-        if all(c is not None for c in costs)
-        else "unknown (model not priced in eval/pricing.yaml)",
-        "stops": {s: sum(1 for r in rows if r["stop"] == s) for s in sorted({r["stop"] for r in rows})},
-    }
+    summary = summarise(rows)
     out = {
         "generated_by": "eval/agent_eval.py",
         "provider_model_requested": llm.model_id,
         "models_that_answered": models,  # differs from the request if a fallback model served a turn
-        "judge_model": llm.model_id if args.judge else None,
-        "subset": args.subset or ("only:" + args.only if args.only else "full"),
+        "judge_model": llm.model_id if any("judge_score" in r for r in rows) else None,
+        "subset": subset,
         "embedding_model": embedder.model_id,
         "caller": EVAL_USER.subject,
+        "aborted": aborted,
         "summary": summary,
         "per_question": rows,
     }
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    tag = re.sub(r"[^a-z0-9.-]+", "-", llm.model_id.lower()) + ("-ci" if args.subset == "ci" else "")
-    (RESULTS / f"agent-{tag}.json").write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
+    result_path.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
     with (RESULTS / f"agent-{tag}-answers.jsonl").open("w", encoding="utf-8") as fh:
         for a_ in answers:
             fh.write(json.dumps(a_, ensure_ascii=False) + "\n")
 
-    print(f"\nAgent evaluation: {len(rows)} questions, model {llm.model_id} (answered by {', '.join(models)})")
+    print(
+        f"\nAgent evaluation: {len(rows)} questions ({subset}), model {llm.model_id} (answered by {', '.join(models)})"
+    )
     for k, v in summary.items():
         print(f"  {k:<24} {v}")
     print(f"written eval/results/agent-{tag}.json and -answers.jsonl (for spot checks)")
@@ -255,6 +359,15 @@ async def run(args: argparse.Namespace) -> int:
     if failed:
         print("POLICY VIOLATIONS:\n  " + "\n  ".join(failed), file=sys.stderr)
         return 1
+    errored = [r["id"] for r in rows if r["stop"] == "llm_error"]
+    if errored or skipped:
+        retry = ",".join(errored + skipped)
+        print(
+            f"INCOMPLETE: {len(errored)} LLM errors, {len(skipped)} questions not run. "
+            f"Re-run them with --only {retry} once the provider works; the results are merged into this file.",
+            file=sys.stderr,
+        )
+        return 3
     if args.min_answer_hit is not None and (summary["answer_hit_rate"] or 0) < args.min_answer_hit:
         print(f"REGRESSION: answer hit rate {summary['answer_hit_rate']} < {args.min_answer_hit}", file=sys.stderr)
         return 1
