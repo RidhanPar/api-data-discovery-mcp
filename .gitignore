@@ -38,6 +38,8 @@ coverage.xml
 secrets/
 *.secret
 credentials.json
+# Mailpit SMTP credential for n8n: no secret (Mailpit has no auth), imported by deploy/n8n/import.sh
+!deploy/n8n/credentials.json
 service-account*.json
 .azure/
 *.tfvars
