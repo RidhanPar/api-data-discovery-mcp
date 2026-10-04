@@ -2,7 +2,7 @@ comma := ,
 .PHONY: install model db migrate ingest serve mcp mcp-demo search catalog generate test test-unit lint check down up image workflows demo-access-flow eval-retrieval eval-retrieval-ci eval-agent azure-test azure-cost azure-up azure-down
 
 install:
-	uv sync
+	uv sync --all-extras  # the azure and anthropic LLM providers, as CI and the image install them
 
 model:            ## download + verify the local embedding model (needs Docker)
 	uv run python scripts/fetch_model.py
