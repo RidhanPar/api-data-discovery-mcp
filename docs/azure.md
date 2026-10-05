@@ -99,8 +99,8 @@ N times the configured one.
 | Offline plan tests with mocked providers (`terraform test`): private DB, no OpenAI keys, per-secret grants, IP restriction on n8n, scale-to-zero, budget alerts | 2 runs, all assertions pass |
 | Keycloak realm placeholders (`${MCP_CLIENT_SECRET:...}`) are resolved from the environment at import | Verified against Keycloak 26.4 locally |
 | Azure OpenAI managed-identity code path (`azure_ad_token_provider`) | Unit-level only: no Azure access from the build environment |
-| `make azure-up` against a real subscription | **Not run yet**: the build environment cannot reach `management.azure.com`. Expect to fix small things on the first apply (model availability in the region, quota) |
-| `make azure-cost` | **Not run yet**: the Retail Prices API is blocked from the build environment. The script prints every meter it uses, so its output can be checked |
+| `make azure-up` against a real subscription | **Done** (Sweden Central, free-trial subscription): all resources created, ingestion job succeeded, MCP demo passes through the deployed Keycloak, n8n healthy |
+| `make azure-cost` | **Done**: USD 50.46/month at list price for Sweden Central (40 busy hours of the scale-to-zero apps) |
 
 Known risks on the first apply: model versions/quotas for `gpt-4.1-mini` and
 `text-embedding-3-small` in the chosen region (variables `chat_model`,
