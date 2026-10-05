@@ -92,7 +92,14 @@ resource "azurerm_private_dns_zone_virtual_network_link" "postgres" {
 # ------------------------------------------------------------------ secrets
 
 resource "random_password" "secret" {
-  for_each = toset([
+  for_each = toset(local.random_secrets)
+  length   = 32
+  special  = false # used inside URLs and shell-free env vars
+}
+
+locals {
+  # Static names, so for_each keys are known at plan time on the first apply.
+  random_secrets = [
     "db-password",
     "n8n-encryption-key",
     "webhook-secret",
@@ -105,12 +112,7 @@ resource "random_password" "secret" {
     "demo-password-alice",
     "demo-password-bob",
     "demo-password-dpo",
-  ])
-  length  = 32
-  special = false # used inside URLs and shell-free env vars
-}
-
-locals {
+  ]
   pg_admin = "nordlysadmin"
   pg_host  = azurerm_postgresql_flexible_server.main.fqdn
   secrets = merge(
@@ -147,7 +149,7 @@ resource "time_sleep" "rbac" {
 }
 
 resource "azurerm_key_vault_secret" "main" {
-  for_each     = nonsensitive(toset(keys(local.secrets)))
+  for_each     = toset(concat(local.random_secrets, ["database-url"]))
   name         = each.key
   value        = local.secrets[each.key]
   key_vault_id = azurerm_key_vault.main.id

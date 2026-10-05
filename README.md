@@ -358,12 +358,23 @@ The design, the Entra ID mapping and why API Management is not deployed are in
 **Cost:** `make azure-cost` prices the footprint from live Azure list prices, showing
 every meter it uses. Most of the stack scales to zero; n8n and the mail sink stay on.
 
-**Not yet run:**
+**Measured on a real subscription (Sweden Central, 5 October 2026):**
 
-* `make azure-cost`: the build environment cannot reach the Azure price API, so there is
-  no number here yet.
-* `make azure-up`: it has not been applied to a subscription either. Terraform validates,
-  and the offline plan tests pass.
+* `make azure-cost`: **USD 50.46/month** at list price. That is Container Apps 26.49
+  (40 busy hours), PostgreSQL B1ms with 32 GB 18.91 and ACR Basic 5.06, plus usage-based
+  Log Analytics, Key Vault and Azure OpenAI tokens.
+* `make azure-up` created all 93 Terraform resources (24 Azure resources in one resource group). Ingestion ran as a Container Apps job, and the
+  MCP client demo passed against the public endpoint, signed in through the deployed
+  Keycloak. MCP `/health/ready` reports the catalog healthy, and n8n `/healthz` returns 200.
+* Endpoints have the form `https://mcp.<env>.swedencentral.azurecontainerapps.io/mcp`,
+  with the issuer at `https://keycloak.<env>.../realms/nordlys`. n8n is reachable only
+  from `admin_cidrs`.
+* Scale to zero has a price: the first request after an idle period waits for a cold
+  start, about 20 to 45 seconds for Keycloak and the catalog.
+
+Bugs the first real apply found are fixed: Key Vault secret keys were unknown at plan
+time, the price API had renamed the Postgres storage meter, and a Windows checkout gave
+`import.sh` CRLF line endings, which broke the n8n init container.
 
 ## Observability
 

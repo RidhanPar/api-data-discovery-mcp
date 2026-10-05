@@ -112,7 +112,7 @@ def main() -> int:
     pg = query(f"serviceName eq 'Azure Database for PostgreSQL' and {region}", a.currency)
     print("PostgreSQL Flexible Server:")
     total += show("B1ms compute (hours)", pick(pg, "flexible", "b1ms"), HOURS)
-    total += show("storage 32 GiB (GB-month)", pick(pg, "flexible", "storage data stored"), 32)
+    total += show("storage 32 GiB (GB-month)", pick(pg, "flex", "server storage | storage | storage data stored"), 32)
 
     acr = query(f"serviceName eq 'Container Registry' and {region}", a.currency)
     print("Container Registry:")
